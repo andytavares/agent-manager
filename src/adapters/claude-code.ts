@@ -316,7 +316,8 @@ const PLUGIN_NOTICE = "Restart Claude Code sessions or run /reload-plugins to lo
 
 function pluginCommandArgs(change: Change): string[] {
   const { op, item, plugin, marketplace, target } = change
-  if (!plugin && !item) return ["marketplace", op === "create" ? "add" : "remove", marketplace!, "--scope", CLI_SCOPES[target.scope]]
+  // Remove without --scope: it fails for a marketplace that the target scope does not declare.
+  if (!plugin && !item) return op === "create" ? ["marketplace", "add", marketplace!, "--scope", CLI_SCOPES[target.scope]] : ["marketplace", "remove", marketplace!]
   if (op === "create") return ["install", plugin!.name, "-s", CLI_SCOPES[target.scope]]
   const scope = CLI_SCOPES[item!.scope]
   if (op === "delete") return ["uninstall", item!.name, "-s", scope]
@@ -332,8 +333,10 @@ function planPlugin(change: Change, roots: Roots): WritePlan {
   if (item?.readOnly) throw new Error(`${LABEL}: ${item.name} is read-only (${item.readOnly})`)
   const { configDir } = configPaths(roots)
   const scope = item?.scope ?? change.target.scope
-  const settings = settingsFiles(roots, configDir)[["global", "project", "local"].indexOf(scope)]!
-  const touches = [installedPluginsPath(roots), join(configDir, "plugins/known_marketplaces.json"), settings]
+  const allSettings = settingsFiles(roots, configDir)
+  const settings = allSettings[["global", "project", "local"].indexOf(scope)]!
+  const removesMarketplace = op === "delete" && !item
+  const touches = [installedPluginsPath(roots), join(configDir, "plugins/known_marketplaces.json"), ...(removesMarketplace ? allSettings : [settings])]
   const command = { argv: ["claude", "plugin", ...pluginCommandArgs(change)], touches, cwd: roots.project }
   return { ...emptyPlan(), commands: [command], notices: [PLUGIN_NOTICE] }
 }

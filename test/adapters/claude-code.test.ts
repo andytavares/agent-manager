@@ -311,11 +311,16 @@ test("plugin update enables, disables or updates from the item's state", async (
   expect(same).toEqual(commandOnly(["claude", "plugin", "update", "alpha@mkt", "-s", "user"], USER_SETTINGS()))
 })
 
-test("marketplace create adds and delete removes at the target scope", async () => {
+test("marketplace create adds at the target scope", async () => {
   const add = await claudeCode.plan(pluginChange("project", { op: "create", marketplace: "acme/plugins" }), roots())
   expect(add).toEqual(commandOnly(["claude", "plugin", "marketplace", "add", "acme/plugins", "--scope", "project"], PROJECT_SETTINGS()))
+})
+
+// A marketplace such as claude-plugins-official is declared in no settings file, so --scope user fails.
+test("marketplace delete removes from every scope and backs up every settings file", async () => {
   const remove = await claudeCode.plan(pluginChange("global", { op: "delete", marketplace: "acme" }), roots())
-  expect(remove).toEqual(commandOnly(["claude", "plugin", "marketplace", "remove", "acme", "--scope", "user"], USER_SETTINGS()))
+  const touches = [...pluginTouches(USER_SETTINGS()), PROJECT_SETTINGS(), LOCAL_SETTINGS()]
+  expect(remove.commands).toEqual([{ argv: ["claude", "plugin", "marketplace", "remove", "acme"], touches, cwd: project }])
 })
 
 test("plugin plan refuses read-only items and move or copy", async () => {
