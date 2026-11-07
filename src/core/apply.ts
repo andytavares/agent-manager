@@ -32,13 +32,17 @@ export function defaultBackupRoot(roots: Roots): string {
   return join(stateHome, "agent-manager/backups")
 }
 
-// Order: check everything, back up, then edits, moves, commands. A failed command leaves earlier steps applied.
+// Order: check everything, back up, then edits, moves, copies, commands. A failed command leaves earlier steps applied.
 export async function applyPlan(plan: WritePlan, options: ApplyOptions): Promise<{ backupDir: string; notices: string[] }> {
   await checkPlan(plan)
   const backupDir = join(options.backupRoot, timestamp(options.now ?? new Date()))
   await backUp(plan, backupDir)
   await writeEdits(plan)
   for (const move of plan.moves) await movePath(move.from, move.to)
+  for (const { from, to } of plan.copies) {
+    await mkdir(dirname(to), { recursive: true })
+    await cp(from, to, { recursive: true })
+  }
   const run = options.run ?? runCommand
   for (const { argv } of plan.commands) {
     const { code, stderr } = await run(argv)
@@ -55,6 +59,10 @@ async function checkPlan(plan: WritePlan): Promise<void> {
   for (const { from, to } of plan.moves) {
     if (!existsSync(from)) throw new Error(`Cannot move ${from}: it does not exist.`)
     if (existsSync(to)) throw new Error(`Cannot move to ${to}: it already exists.`)
+  }
+  for (const { from, to } of plan.copies) {
+    if (!existsSync(from)) throw new Error(`Cannot copy ${from}: it does not exist.`)
+    if (existsSync(to)) throw new Error(`Cannot copy to ${to}: it already exists.`)
   }
 }
 

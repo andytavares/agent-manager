@@ -17,7 +17,7 @@ beforeEach(async () => {
 })
 
 function plan(parts: Partial<WritePlan>): WritePlan {
-  return { edits: [], moves: [], removals: [], commands: [], notices: [], ...parts }
+  return { edits: [], moves: [], copies: [], removals: [], commands: [], notices: [], ...parts }
 }
 
 const read = (path: string) => readFile(path, "utf8")
@@ -119,6 +119,42 @@ test("a move onto an existing target fails before any change", async () => {
   await expect(attempt).rejects.toThrow(to)
   expect(existsSync(edited)).toBe(false)
   expect(await read(from)).toBe("from")
+  expect(existsSync(backupRoot)).toBe(false)
+})
+
+test("copies a folder recursively and keeps the source", async () => {
+  const from = join(dir, "skills/pdf")
+  const to = join(dir, "other/skills/pdf")
+  await mkdir(join(from, "scripts"), { recursive: true })
+  await writeFile(join(from, "SKILL.md"), "pdf skill")
+  await writeFile(join(from, "scripts/run.sh"), "echo")
+  await applyPlan(plan({ copies: [{ from, to }] }), { backupRoot, now })
+  expect(await read(join(to, "SKILL.md"))).toBe("pdf skill")
+  expect(await read(join(to, "scripts/run.sh"))).toBe("echo")
+  expect(await read(join(from, "SKILL.md"))).toBe("pdf skill")
+})
+
+test("a copy onto an existing path fails before any change", async () => {
+  const edited = join(dir, "a.md")
+  const from = join(dir, "from")
+  const to = join(dir, "to")
+  await mkdir(from)
+  await writeFile(join(from, "SKILL.md"), "from")
+  await mkdir(to)
+  await writeFile(join(to, "SKILL.md"), "to")
+  const attempt = applyPlan(plan({ edits: [{ path: edited, before: null, after: "x" }], copies: [{ from, to }] }), {
+    backupRoot,
+    now,
+  })
+  await expect(attempt).rejects.toThrow(to)
+  expect(existsSync(edited)).toBe(false)
+  expect(await read(join(to, "SKILL.md"))).toBe("to")
+  expect(existsSync(backupRoot)).toBe(false)
+})
+
+test("a copy from a missing path fails before any change", async () => {
+  const from = join(dir, "absent")
+  await expect(applyPlan(plan({ copies: [{ from, to: join(dir, "to") }] }), { backupRoot, now })).rejects.toThrow(from)
   expect(existsSync(backupRoot)).toBe(false)
 })
 

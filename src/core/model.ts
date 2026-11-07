@@ -64,8 +64,27 @@ export interface HarnessAdapter {
   detect(roots: Roots): Promise<boolean>
   list(kind: Kind, roots: Roots): Promise<Item[]>
   read(item: Item): Promise<ItemDetail>
+  // Builds the write plan for a memory change (later: mcp, plugin). Skills are planned in src/core/skills.ts.
+  // Throws an Error with a user-facing message when the change is not allowed.
+  plan(change: Change, roots: Roots): Promise<WritePlan>
+  // Memory file names a user can create per scope, relative to that scope's root; "<name>" is filled in by the user.
+  memoryFiles: Partial<Record<Scope, string[]>>
+  // Skill roots this harness reads, in its own precedence order.
+  skillRoots(roots: Roots): Promise<{ path: string; scope: Scope }[]>
   // MCP sources of other harnesses this harness imports (omp); the registry adds it to their loadedBy.
   importsMcpFrom?(roots: Roots): Promise<{ harness: HarnessId; scope: Scope }[]>
+}
+
+export interface Change {
+  kind: Kind
+  op: "create" | "update" | "delete" | "move" | "copy"
+  target: { harness: HarnessId; scope: Scope }
+  item?: Item // update, delete, move, copy
+  name?: string // create: memory file name (from memoryFiles, "<name>" filled) or skill folder name
+  text?: string // full new text: memory file or SKILL.md
+  destination?: string // move, copy: destination skill root
+  server?: McpServer // mcp create, update
+  plugin?: PluginInfo // plugin changes
 }
 
 // A change as files and commands. Adapters build it; only src/core/apply.ts carries it out.
@@ -79,6 +98,7 @@ export interface FileEdit {
 export interface WritePlan {
   edits: FileEdit[]
   moves: { from: string; to: string }[] // files or folders
+  copies: { from: string; to: string }[] // files or folders
   removals: string[] // files or folders, moved into the backup instead of deleted
   commands: { argv: string[]; touches: string[] }[] // touches = files backed up before the command runs
   notices: string[] // shown after apply, e.g. "Restart Claude Code sessions to load this change."
