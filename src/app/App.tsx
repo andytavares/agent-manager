@@ -5,7 +5,7 @@ import { defaultBackupRoot } from "../core/apply"
 import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, ProjectData, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
-import { addMarketplace, addMemory, deleteItem, deleteProject, editItem, type FlowContext, type Marketplace, newSkill, projectList, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
+import { addMarketplace, addMemory, deleteItem, deleteProjects, editItem, type FlowContext, type Marketplace, marketplaceList, newSkill, projectList, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
 import { ACCENT, DIM, ItemList, SELECTED_BG, tildePath } from "./ItemList"
 import { Marketplaces } from "./Marketplaces"
 import { McpForm, type McpTarget } from "./McpForm"
@@ -16,6 +16,7 @@ import { TextEditor } from "./TextEditor"
 
 type ScopeView = "global" | "project" // project shows project and local items
 type Focus = "harness" | "list"
+type ListScreen = "list" | "projects" | "marketplaces" // where back and apply return to
 
 const KIND_KEYS: Record<string, Kind> = { "1": "memory", "2": "mcp", "3": "skill", "4": "plugin" }
 const TAB_NAMES = ["1 Memory", "2 MCP", "3 Skills", "4 Plugins"]
@@ -33,7 +34,7 @@ const STATUS: Record<string, string> = {
   mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel",
   review: "enter apply  esc back",
   marketplaces: "a add  d remove  esc back",
-  projects: "enter open  d delete its Claude Code data  esc keep current project",
+  projects: "space mark  d delete Claude Code data of marked or highlighted  enter open  esc keep current project",
 }
 
 interface AppProps {
@@ -48,6 +49,11 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   const roots = useMemo(() => ({ ...startRoots, project }), [startRoots, project])
   const [view, dispatch] = useReducer(pressKey, START_VIEW)
   const [screen, setScreen] = useState<Screen>(LIST)
+  const [returnTo, setReturnTo] = useState<ListScreen>("list")
+  const show = (next: Screen) => {
+    if (next.name === "list" || next.name === "projects" || next.name === "marketplaces") setReturnTo(next.name)
+    setScreen(next)
+  }
   const [message, setMessage] = useState(NO_MESSAGE)
   const [reloads, setReloads] = useState(0)
   const [filter, setFilterState] = useState(NO_FILTER)
@@ -68,9 +74,9 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   const selectedItem = visible[selected]
   const fail = (error: Error) => {
     setMessage({ text: error.message, error: true })
-    setScreen(LIST)
+    show(LIST)
   }
-  const start = (next: Screen | Promise<Screen | void>) => Promise.resolve(next).then((screen) => screen && setScreen(screen), fail)
+  const start = (next: Screen | Promise<Screen | void>) => Promise.resolve(next).then((screen) => screen && show(screen), fail)
   const context: FlowContext = {
     adapters: adapters.filter((_, index) => detected[index]),
     roots,
@@ -79,21 +85,22 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
       Promise.all(changes.map((change) => planChange(adapters, change, roots))).then((plans) => {
         setScreen({ name: "review", plan: mergePlans(plans), secrets: changes.flatMap((change) => literalSecrets(change.server)) })
       }, fail),
-    open: setScreen,
+    open: show,
+    back: () => (returnTo === "list" ? show(LIST) : start(returnTo === "projects" ? projectList(context) : marketplaceList(context))),
   }
   const openProject = (picked: ProjectData) => {
-    if (!picked.path) return fail(new Error(`Cannot open ${basename(picked.dataDir)}: its project folder is unknown.`))
+    if (!picked.path) return setMessage({ text: `Cannot open ${basename(picked.dataDir)}: its project folder is unknown.`, error: true })
     setProject(picked.path)
-    setScreen(LIST)
+    show(LIST)
   }
   const onApplied = (text: string) => {
     setMessage({ text, error: false })
-    setScreen(LIST)
+    context.back()
     setReloads((count) => count + 1)
   }
   useKeyboard((key) => {
-    if (screen.name !== "list") return
     setMessage(NO_MESSAGE)
+    if (screen.name !== "list") return
     const typed = key.sequence ?? key.name
     if (showHelp) setShowHelp(false)
     else if (filterNow.current.active) setFilter(filterKey(filterNow.current, key.name, typed))
@@ -190,7 +197,8 @@ interface ActiveScreenProps {
 }
 
 function ActiveScreen({ screen, context, backupRoot, onApplied, onOpenProject }: ActiveScreenProps) {
-  const back = () => context.open(LIST)
+  const back = context.back
+  const toList = () => context.open(LIST)
   if (screen.name === "prompt") return <Prompt title={screen.title} nextStep={screen.nextStep} onDone={screen.onDone} onCancel={back} />
   if (screen.name === "editor") {
     const save = (text: string) => context.review(screen.toChange(text))
@@ -204,12 +212,12 @@ function ActiveScreen({ screen, context, backupRoot, onApplied, onOpenProject }:
   if (screen.name === "marketplaces") {
     const add = () => context.open(addMarketplace(context))
     const remove = (marketplace: Marketplace) => removeMarketplace(marketplace, context)
-    return <Marketplaces marketplaces={screen.marketplaces} onAdd={add} onRemove={remove} onBack={back} />
+    return <Marketplaces marketplaces={screen.marketplaces} onAdd={add} onRemove={remove} onBack={toList} />
   }
   if (screen.name === "projects") {
-    const remove = (project: ProjectData) => deleteProject(project, context)
+    const remove = (projects: ProjectData[]) => deleteProjects(projects, context)
     const { roots } = context
-    return <Projects projects={screen.projects} current={roots.project} home={roots.home} onOpen={onOpenProject} onDelete={remove} onBack={back} />
+    return <Projects projects={screen.projects} current={roots.project} home={roots.home} onOpen={onOpenProject} onDelete={remove} onBack={toList} />
   }
   return <ReviewChanges plan={screen.plan} secrets={screen.secrets} backupRoot={backupRoot} home={context.roots.home} onApplied={onApplied} onBack={back} />
 }
