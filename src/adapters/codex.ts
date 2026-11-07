@@ -4,6 +4,7 @@ import { basename, dirname, join, relative } from "node:path"
 import { parse, patch, stringify } from "@decimalturn/toml-patch"
 import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
 import { emptyPlan, planMemoryFile } from "../core/memory-plan"
+import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import { listSkillFolders } from "../core/skills"
 
 type Table = Record<string, any>
@@ -335,9 +336,11 @@ async function planPlugin(change: Change, roots: Roots): Promise<WritePlan> {
 async function marketplaces(roots: Roots): Promise<{ name: string; source: string }[]> {
   const root = projectDirs(roots.project)[0]!
   const files = [join(roots.home, ".agents/plugins/marketplace.json"), join(root, ".agents/plugins/marketplace.json"), join(root, ".claude-plugin/marketplace.json")]
-  return files.filter(existsSync).map((source) => {
-    const data = JSON.parse(readFileSync(source, "utf8")) as Table
-    return { name: typeof data.name === "string" ? data.name : basename(dirname(dirname(source))), source }
+  return files.filter(existsSync).flatMap((source) => {
+    const errors: ParseError[] = []
+    const data = parseJsonc(readFileSync(source, "utf8"), errors) as Table | undefined
+    if (errors.length > 0 || !data || typeof data !== "object") return [] // a broken file must not break the install screen
+    return [{ name: typeof data.name === "string" ? data.name : basename(dirname(dirname(source))), source }]
   })
 }
 

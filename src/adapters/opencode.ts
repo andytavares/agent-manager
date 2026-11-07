@@ -327,11 +327,9 @@ function editPluginEntry(change: Change, item: Item, text: string): string {
   const plugin = change.plugin!
   const entry = (parseConfig(text)?.[field!] as unknown[])[Number(index)]
   const current = toPlugin(entry)!
-  if (plugin.enabled !== current.enabled) {
-    if (field === "plugin") throw new Error("OpenCode 1.x cannot turn a plugin off; uninstall it instead")
-    return plugin.enabled ? setJsonc(text, at, undefined) : setJsonc(text, [field!, -1], `-${plugin.name}`)
-  }
-  const spec = (current.enabled ? "" : "-") + pluginSpec(plugin)
+  if (plugin.enabled !== current.enabled && field === "plugin") throw new Error("OpenCode 1.x cannot turn a plugin off; uninstall it instead")
+  // v2 turns a plugin off with a leading "-"; toggling rewrites the same entry so it stays one row.
+  const spec = (plugin.enabled ? "" : "-") + pluginSpec({ ...plugin, version: plugin.version ?? current.version })
   return setJsonc(text, isObject(entry) ? [...at, "package"] : at, spec)
 }
 

@@ -417,3 +417,9 @@ test("read shows env_vars and env_http_headers as ${VAR} refs, so another harnes
   expect(server.headers).toEqual({ "X-B": "${B}" })
   expect(server.native).toEqual({})
 })
+
+test("a malformed marketplace.json is skipped, not thrown", async () => {
+  mkdirSync(join(home, ".agents/plugins"), { recursive: true })
+  writeFileSync(join(home, ".agents/plugins/marketplace.json"), "{ not json")
+  expect(await codex.marketplaces!(roots)).toEqual([])
+})

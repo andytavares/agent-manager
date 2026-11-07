@@ -373,13 +373,13 @@ test("plan plugin uninstall removes the array element; a local plugin file or fo
   expect(await opencode.plan(pluginChange({ op: "delete", item: local }), v2)).toEqual({ ...emptyPlan, removals: [local.path], notices: pluginNotice })
 })
 
-test("plan plugin v2 disable adds a '-name' entry; enable removes it", async () => {
+test("plan plugin v2 toggles in place: off rewrites the entry as '-name', on removes the '-'", async () => {
   const wakatime = await pluginItem(v2, "plugins[0]")
   const off = await pluginEdit(pluginChange({ op: "update", item: wakatime, plugin: npm({ name: "opencode-wakatime", version: "1.2.0", enabled: false }) }), v2)
-  expect(parse(off.after!).plugins).toEqual(["opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }, "-oc-off", "-opencode-wakatime"])
+  expect(parse(off.after!).plugins).toEqual(["-opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }, "-oc-off"])
   const ocOff = await pluginItem(v2, "plugins[2]")
   const on = await pluginEdit(pluginChange({ op: "update", item: ocOff, plugin: npm({ name: "oc-off" }) }), v2)
-  expect(parse(on.after!).plugins).toEqual(["opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }])
+  expect(parse(on.after!).plugins).toEqual(["opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }, "oc-off"])
 })
 
 test("plan plugin toggle refuses v1 and local plugin files", async () => {
