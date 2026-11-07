@@ -1,0 +1,69 @@
+test/fixtures/opencode/v2/home/work/project/.opencode/plugin/proj.ts
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v1/home/.claude/CLAUDE.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/.config/opencode/plugins/local-dir/index.ts
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v1/home/work/project/CLAUDE.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v1/home/work/project/opencode.jsonc
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-3
+test/adapters/opencode.test.ts
+  s_b67d2564e0abf8::t_9cdc2ef575742a 35
+  s_b67d2564e0abf8::t_3d5aaa5940e813 1-34,36-174
+test/fixtures/opencode/v1/home/work/AGENTS.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/.config/opencode/AGENTS.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/work/project/AGENTS.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/notes.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/.config/opencode/plugins/local.ts
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+src/adapters/opencode.ts
+  s_b67d2564e0abf8::t_b7c70a85627b93 5
+  s_b67d2564e0abf8::t_e61abbb1d835c7 1-4,6-67,70-85,92-96,98-125,133-134,136-138,140,142-151,156-183,185-213,215-242,251-258,261-265,269-273
+  s_b67d2564e0abf8::t_e2028528ddb394 68-69,86-91,97,126-132,135,139,141,152-155,184,214,266-268
+  s_b67d2564e0abf8::t_9cdc2ef575742a 243-250,259-260
+test/fixtures/opencode/v2/home/.claude/skills/research/SKILL.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-3
+test/fixtures/opencode/v2/home/work/project/.opencode/opencode.jsonc
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-4
+test/fixtures/opencode/v2/home/.agents/skills/shared/SKILL.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-3
+test/fixtures/opencode/v2/home/work/AGENTS.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/.config/opencode/opencode.jsonc
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-11
+test/fixtures/opencode/v2/home/work/project/opencode.json
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v1-broken/home/.config/opencode/opencode.json
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/.claude/CLAUDE.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+test/fixtures/opencode/v2/home/.config/opencode/skills/pdf/SKILL.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-4
+test/fixtures/opencode/v1/home/.config/opencode/opencode.json
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-8
+test/fixtures/opencode/v2/home/work/project/.opencode/skills/deploy/SKILL.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1-3
+test/fixtures/opencode/v2/home/.config/opencode/rules/a.md
+  s_b67d2564e0abf8::t_39ea424dd248e3 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "de60541004c8ca646f05a1694b6075491ccc77f5",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
