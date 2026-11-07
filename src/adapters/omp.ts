@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises"
 import { basename, dirname, join, parse as parsePath, relative } from "node:path"
 import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import { parse as parseYaml } from "yaml"
-import type { Change, HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
+import type { Change, HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope } from "../core/model"
+import { planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders } from "../core/skills"
 
 // omp (oh-my-pi). Paths and rules: https://github.com/can1357/oh-my-pi/tree/main/docs
@@ -198,23 +199,8 @@ function listMemory(ctx: Context): Item[] {
 
 const MEMORY_FILES: Partial<Record<Scope, string[]>> = { global: ["AGENTS.md", "RULES.md"], project: ["AGENTS.md", "RULES.md"] }
 
-async function planMemory(change: Change, roots: Roots): Promise<WritePlan> {
-  const plan: WritePlan = { edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] }
-  if (change.op === "create") {
-    const { scope } = change.target
-    if (!MEMORY_FILES[scope]?.includes(change.name ?? "")) throw new Error(`omp: cannot create ${change.name} in ${scope} scope`)
-    const path = join(scope === "global" ? agentDir(roots) : join(roots.project, ".omp"), change.name!)
-    if (existsSync(path)) throw new Error(`omp: ${path} already exists`)
-    plan.edits.push({ path, before: null, after: change.text ?? "" })
-    return plan
-  }
-  const target = change.item!
-  if (target.readOnly) throw new Error(`omp: ${target.path} is read-only (${target.readOnly})`)
-  if (change.op === "update") plan.edits.push({ path: target.path, before: await readFile(target.path, "utf8"), after: change.text ?? "" })
-  else if (change.op === "delete") plan.removals.push(target.path)
-  else throw new Error(`omp: memory ${change.op} is not supported`)
-  return plan
-}
+const planMemory = (change: Change, roots: Roots) =>
+  planMemoryFile(change, { label: "omp", scopeRoot: (scope) => (scope === "global" ? agentDir(roots) : join(roots.project, ".omp")), memoryFiles: MEMORY_FILES })
 
 // User mcp.json disabledServers/enabledServers apply to servers from every source (mcp-config.md).
 async function listMcp(ctx: Context): Promise<Item[]> {

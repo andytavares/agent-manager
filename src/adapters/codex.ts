@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises"
 import { basename, dirname, join, relative } from "node:path"
 import { parse } from "@decimalturn/toml-patch"
 import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
+import { planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders } from "../core/skills"
 
 type Table = Record<string, any>
@@ -205,27 +206,11 @@ async function read(target: Item): Promise<ItemDetail> {
   return { type: "plugin", plugin: target.key ? { name: target.name, enabled, source } : { name: target.name, enabled, version: basename(target.path), source } }
 }
 
-const emptyPlan = (): WritePlan => ({ edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] })
-
-function planCreate(change: Change, roots: Roots): WritePlan {
-  const { scope } = change.target
-  const name = change.name ?? ""
-  if (!MEMORY_FILES[scope]?.includes(name)) throw new Error(`Codex: ${name} is not a ${scope} memory file`)
-  const scopeRoot = scope === "global" ? context(roots).codexHome : projectDirs(roots.project)[0]!
-  const path = join(scopeRoot, name)
-  if (existsSync(path)) throw new Error(`Codex: ${path} already exists`)
-  return { ...emptyPlan(), edits: [{ path, before: null, after: change.text ?? "" }] }
-}
-
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
   if (change.kind !== "memory") throw new Error(`Codex: ${change.kind} changes are not supported yet`)
-  if (change.op === "create") return planCreate(change, roots)
-  const target = change.item!
-  if (target.readOnly) throw new Error(`Codex: ${target.name} is read-only (${target.readOnly})`)
-  if (change.op === "delete") return { ...emptyPlan(), removals: [target.path] }
-  if (change.op !== "update") throw new Error(`Codex: memory files cannot ${change.op}`)
-  if (target.warnings?.includes(GENERATED_WARNING)) throw new Error("Codex: generated memories can only be read or deleted")
-  return { ...emptyPlan(), edits: [{ path: target.path, before: readFileSync(target.path, "utf8"), after: change.text ?? "" }] }
+  if (change.op === "update" && change.item?.warnings?.includes(GENERATED_WARNING)) throw new Error("Codex: generated memories can only be read or deleted")
+  const scopeRoot = (scope: Scope) => (scope === "global" ? context(roots).codexHome : projectDirs(roots.project)[0]!)
+  return planMemoryFile(change, { label: "Codex", scopeRoot, memoryFiles: MEMORY_FILES })
 }
 
 async function skillRoots(roots: Roots): Promise<{ path: string; scope: Scope }[]> {

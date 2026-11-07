@@ -13,6 +13,7 @@ import {
   type Scope,
   type WritePlan,
 } from "../core/model"
+import { emptyPlan, memoryPattern, planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders, parseFrontmatter } from "../core/skills"
 
 type Json = Record<string, any>
@@ -196,12 +197,7 @@ const MEMORY_FILES: Record<Scope, string[]> = {
 }
 const AUTO_MEMORY_ENTRY = "memory/<name>.md"
 
-const emptyPlan = (): WritePlan => ({ edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] })
 const readText = async (path: string) => (existsSync(path) ? readFile(path, "utf8") : null)
-
-function memoryPattern(pattern: string): RegExp {
-  return new RegExp(`^${pattern.replaceAll(".", "\\.").replace("<name>", "[a-z0-9][a-z0-9-_]*")}$`)
-}
 
 function memoryIndexLine(fileName: string, text: string): string {
   const { data } = parseFrontmatter(text)
@@ -209,32 +205,23 @@ function memoryIndexLine(fileName: string, text: string): string {
   return `- [${title}](${fileName})${typeof data.description === "string" ? ` — ${data.description}` : ""}`
 }
 
-async function planCreate(change: Change, roots: Roots, autoDir: string): Promise<WritePlan> {
-  const { scope } = change.target
-  const name = change.name ?? ""
-  const pattern = MEMORY_FILES[scope].find((candidate) => memoryPattern(candidate).test(name))
-  if (!pattern) throw new Error(`${LABEL}: ${name} is not a ${scope} memory file`)
-  const isAutoEntry = pattern === AUTO_MEMORY_ENTRY
-  const scopeRoot = scope === "global" ? configPaths(roots).configDir : roots.project
-  const path = isAutoEntry ? join(autoDir, name.slice("memory/".length)) : join(scopeRoot, name)
+// An auto memory entry also gets a line in MEMORY.md.
+async function planAutoEntry(change: Change, autoDir: string): Promise<WritePlan> {
+  const path = join(autoDir, change.name!.slice("memory/".length))
   if (existsSync(path)) throw new Error(`${LABEL}: ${path} already exists`)
   const text = change.text ?? ""
-  const plan = emptyPlan()
-  plan.edits.push({ path, before: null, after: text })
-  if (isAutoEntry) {
-    const indexPath = join(autoDir, "MEMORY.md")
-    const before = await readText(indexPath)
-    const head = before && !before.endsWith("\n") ? `${before}\n` : (before ?? "")
-    plan.edits.push({ path: indexPath, before, after: `${head}${memoryIndexLine(relative(autoDir, path), text)}\n` })
-  }
-  return plan
+  const indexPath = join(autoDir, "MEMORY.md")
+  const before = await readText(indexPath)
+  const head = before && !before.endsWith("\n") ? `${before}\n` : (before ?? "")
+  const index = { path: indexPath, before, after: `${head}${memoryIndexLine(relative(autoDir, path), text)}\n` }
+  return { ...emptyPlan(), edits: [{ path, before: null, after: text }, index] }
 }
 
-async function planDelete(item: Item, autoDir: string): Promise<WritePlan> {
-  const plan = emptyPlan()
-  plan.removals.push(item.path)
+// Deleting an auto memory entry also removes its MEMORY.md line.
+async function planAutoDelete(item: Item, autoDir: string): Promise<WritePlan> {
+  const plan: WritePlan = { ...emptyPlan(), removals: [item.path] }
   const indexPath = join(autoDir, "MEMORY.md")
-  const before = item.path.startsWith(`${autoDir}/`) && item.path !== indexPath ? await readText(indexPath) : null
+  const before = await readText(indexPath)
   if (before === null) return plan
   const link = `(${relative(autoDir, item.path)})`
   const after = before
@@ -249,14 +236,12 @@ async function plan(change: Change, roots: Roots): Promise<WritePlan> {
   if (change.kind !== "memory") throw new Error(`${LABEL}: ${change.kind} changes are not supported yet`)
   const { configDir } = configPaths(roots)
   const autoDir = autoMemoryDir(roots, configDir, (await readJson(join(configDir, "settings.json"))) ?? {})
-  if (change.op === "create") return planCreate(change, roots, autoDir)
-  const item = change.item!
-  if (item.readOnly) throw new Error(`${LABEL}: ${item.name} is read-only (${item.readOnly})`)
-  if (change.op === "delete") return planDelete(item, autoDir)
-  if (change.op !== "update") throw new Error(`${LABEL}: memory files cannot ${change.op}`)
-  const plan = emptyPlan()
-  plan.edits.push({ path: item.path, before: await readFile(item.path, "utf8"), after: change.text ?? "" })
-  return plan
+  const item = change.item
+  const isAutoEntry = item && !item.readOnly && item.path.startsWith(`${autoDir}/`) && item.path !== join(autoDir, "MEMORY.md")
+  if (change.op === "create" && change.target.scope === "project" && memoryPattern(AUTO_MEMORY_ENTRY).test(change.name ?? "")) return planAutoEntry(change, autoDir)
+  if (change.op === "delete" && isAutoEntry) return planAutoDelete(item, autoDir)
+  const scopeRoot = (scope: Scope) => (scope === "global" ? configDir : roots.project)
+  return planMemoryFile(change, { label: LABEL, scopeRoot, memoryFiles: MEMORY_FILES })
 }
 
 const LISTERS: Record<Kind, (roots: Roots) => Promise<Item[]>> = {

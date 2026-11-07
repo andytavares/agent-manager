@@ -2,7 +2,8 @@ import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
 import { parse, type ParseError } from "jsonc-parser"
-import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, PluginInfo, Roots, Scope, WritePlan } from "../core/model"
+import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, PluginInfo, Roots, Scope } from "../core/model"
+import { planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders } from "../core/skills"
 
 type Shape = "v1" | "v2" | "unknown"
@@ -113,23 +114,8 @@ async function listMemory(roots: Roots, files: ConfigFile[]): Promise<Item[]> {
 
 const MEMORY_FILES: Partial<Record<Scope, string[]>> = { global: ["AGENTS.md"], project: ["AGENTS.md"] }
 
-async function planMemory(change: Change, roots: Roots): Promise<WritePlan> {
-  const plan: WritePlan = { edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] }
-  if (change.op === "create") {
-    const { scope } = change.target
-    if (!MEMORY_FILES[scope]?.includes(change.name ?? "")) throw new Error(`OpenCode: cannot create ${change.name} in ${scope} scope`)
-    const path = join(scope === "global" ? configDir(roots) : roots.project, change.name!)
-    if (existsSync(path)) throw new Error(`OpenCode: ${path} already exists`)
-    plan.edits.push({ path, before: null, after: change.text ?? "" })
-    return plan
-  }
-  const target = change.item!
-  if (target.readOnly) throw new Error(`OpenCode: ${target.path} is read-only (${target.readOnly})`)
-  if (change.op === "update") plan.edits.push({ path: target.path, before: await readFile(target.path, "utf8"), after: change.text ?? "" })
-  else if (change.op === "delete") plan.removals.push(target.path)
-  else throw new Error(`OpenCode: memory ${change.op} is not supported`)
-  return plan
-}
+const planMemory = (change: Change, roots: Roots) =>
+  planMemoryFile(change, { label: "OpenCode", scopeRoot: (scope) => (scope === "global" ? configDir(roots) : roots.project), memoryFiles: MEMORY_FILES })
 
 // ---- mcp
 
