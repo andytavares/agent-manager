@@ -36,22 +36,22 @@ export function App({ adapters, roots, onQuit }: AppProps) {
     <box flexDirection="column" border width="100%" height="100%">
       <Header project={tildePath(roots.project, roots.home)} scope={scope} />
       <Tabs kind={kind} />
-      <box flexDirection="row" flexGrow={1}>
-        <box border width={22} borderColor={focus === "harness" ? ACCENT : undefined}>
+      <box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
+        <box border width={22} overflow="hidden" borderColor={focus === "harness" ? ACCENT : undefined}>
           <HarnessPane adapters={adapters} detected={detected} counts={countByHarness(adapters, inScope)} selected={harnessIndex} />
         </box>
-        <box border flexGrow={1} borderColor={focus === "list" ? ACCENT : undefined}>
+        <box border flexGrow={1} overflow="hidden" borderColor={focus === "list" ? ACCENT : undefined}>
           {listing.error ? (
             <text fg="#ff5f5f">{listing.error}</text>
           ) : (
             <ItemList kind={kind} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} />
           )}
         </box>
-        <box border width={36}>
+        <box border width={36} overflow="hidden">
           <DetailPane item={selectedItem} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
         </box>
       </box>
-      <text fg={DIM}> 1-4 kind  s scope  tab next pane  ↑↓ move  q quit</text>
+      <text flexShrink={0} fg={DIM}> 1-4 kind  s scope  tab next pane  ↑↓ move  q quit</text>
     </box>
   )
 }
@@ -140,7 +140,7 @@ function clamp(value: number, max: number): number {
 
 function Header({ project, scope }: { project: string; scope: ScopeView }) {
   return (
-    <box flexDirection="row" justifyContent="space-between">
+    <box flexShrink={0} flexDirection="row" justifyContent="space-between">
       <text>
         <span fg={ACCENT}> agent-manager</span>
         <span fg={DIM}>  project: </span>
@@ -163,7 +163,7 @@ function ScopeLabel({ name, active }: { name: string; active: boolean }) {
 function Tabs({ kind }: { kind: Kind }) {
   const activeKey = Object.keys(KIND_KEYS).find((key) => KIND_KEYS[key] === kind)
   return (
-    <text>
+    <text flexShrink={0}>
       {TAB_NAMES.map((name) => (
         <span key={name} fg={name[0] === activeKey ? undefined : DIM} bg={name[0] === activeKey ? SELECTED_BG : undefined}>
           {`  ${name}  `}

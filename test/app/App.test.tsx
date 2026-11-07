@@ -105,3 +105,18 @@ test("q calls onQuit", async () => {
     setup.renderer.destroy()
   }
 })
+
+test("a long detail text stays inside its pane and keeps the header visible", async () => {
+  const long: HarnessAdapter = {
+    ...fakeAdapter("claude-code", "Claude Code"),
+    read: async () => ({ type: "text", text: Array.from({ length: 80 }, (_, n) => `line ${n}`).join("\n") }),
+  }
+  const setup = await testRender(<App adapters={[long]} roots={roots} onQuit={() => {}} />, { width: 110, height: 24 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("line 3"))
+    expect(frame).toContain("1 Memory")
+    expect(frame).toContain("q quit")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
