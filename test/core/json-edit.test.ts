@@ -9,3 +9,9 @@ test("sets a nested key and keeps comments", () => {
 test("undefined removes the key", () => {
   expect(JSON.parse(setJsonc('{ "a": 1, "b": 2 }', ["a"], undefined))).toEqual({ b: 2 })
 })
+
+test("removing the last element of a one-line array keeps valid JSON (jsonc-parser 3.3.1 bug)", () => {
+  expect(JSON.parse(setJsonc('{"a": ["x", "y"], "b": 1}', ["a", 1], undefined))).toEqual({ a: ["x"], b: 1 })
+  expect(JSON.parse(setJsonc('{"a": ["x", "y"], "b": 1}', ["a", 0], undefined))).toEqual({ a: ["y"], b: 1 })
+  expect(JSON.parse(setJsonc('{"a": ["x"]}', ["a", 0], undefined))).toEqual({ a: [] })
+})
