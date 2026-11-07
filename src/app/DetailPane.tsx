@@ -12,14 +12,15 @@ interface DetailPaneProps {
 }
 
 export function DetailPane({ item, adapter, home }: DetailPaneProps) {
-  const [detail, setDetail] = useState<ItemDetail | null>(null)
+  // The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
+  const [loaded, setLoaded] = useState<{ item: Item; detail: ItemDetail } | null>(null)
+  const detail = loaded && loaded.item === item ? loaded.detail : null
   useEffect(() => {
     if (!item || !adapter) return
     let live = true
-    setDetail(null)
     adapter.read(item).then(
-      (read) => live && setDetail(read),
-      (error: Error) => live && setDetail({ type: "text", text: `Cannot read: ${error.message}` }),
+      (read) => live && setLoaded({ item, detail: read }),
+      (error: Error) => live && setLoaded({ item, detail: { type: "text", text: `Cannot read: ${error.message}` } }),
     )
     return () => {
       live = false

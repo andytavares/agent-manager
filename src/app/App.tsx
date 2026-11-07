@@ -1,5 +1,5 @@
 import { useKeyboard } from "@opentui/react"
-import { useEffect, useReducer, useState } from "react"
+import { useEffect, useReducer, useRef, useState } from "react"
 import { defaultBackupRoot } from "../core/apply"
 import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
@@ -19,12 +19,13 @@ const KIND_KEYS: Record<string, Kind> = { "1": "memory", "2": "mcp", "3": "skill
 const TAB_NAMES = ["1 Memory", "2 MCP", "3 Skills", "4 Plugins"]
 const LIST: Screen = { name: "list" }
 const NO_MESSAGE = { text: "", error: false }
-const LIST_KEYS = "1-4 kind  s scope  tab next pane  ↑↓ move  q quit"
+const NO_FILTER = { text: "", active: false }
+const LIST_KEYS = "1-4 kind  s scope  tab pane  / filter  ? help  q quit"
 const STATUS: Record<string, string> = {
   memory: `a add  e/enter edit  d delete  ${LIST_KEYS}`,
   skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}`,
   mcp: `a add  e edit  c copy to…  d delete  space on/off  ${LIST_KEYS}`,
-  plugin: "i install  space on/off  u update  x uninstall  m marketplaces  s scope",
+  plugin: "i install  space on/off  u update  x uninstall  m marketplaces  s scope  / filter  ? help",
   prompt: "↑↓ choose  enter next  esc cancel",
   editor: "ctrl+s review & save  esc discard",
   mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel",
@@ -44,12 +45,20 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
   const [screen, setScreen] = useState<Screen>(LIST)
   const [message, setMessage] = useState(NO_MESSAGE)
   const [reloads, setReloads] = useState(0)
+  const [filter, setFilterState] = useState(NO_FILTER)
+  const filterNow = useRef(NO_FILTER) // keys can arrive faster than renders
+  const setFilter = (next: typeof NO_FILTER) => {
+    filterNow.current = next
+    setFilterState(next)
+  }
+  const [showHelp, setShowHelp] = useState(false)
   const detected = useDetected(adapters, roots)
   const listing = useListing(adapters, roots, view.kind, reloads)
   const { kind, scope, focus, harnessIndex } = view
   const inScope = listing.items.filter((item) => (scope === "global") === (item.scope === "global"))
   const harness = adapters[harnessIndex - 1]
-  const visible = harness ? inScope.filter((item) => matchesHarness(item, harness.id)) : inScope
+  const byHarness = harness ? inScope.filter((item) => matchesHarness(item, harness.id)) : inScope
+  const visible = byHarness.filter((item) => item.name.toLowerCase().includes(filter.text.toLowerCase()))
   const selected = Math.min(view.listIndex, visible.length - 1)
   const selectedItem = visible[selected]
   const fail = (error: Error) => {
@@ -75,7 +84,13 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
   useKeyboard((key) => {
     if (screen.name !== "list") return
     setMessage(NO_MESSAGE)
-    if (key.name === "q") onQuit()
+    const typed = key.sequence ?? key.name
+    if (showHelp) setShowHelp(false)
+    else if (filterNow.current.active) setFilter(filterKey(filterNow.current, key.name, typed))
+    else if (typed === "/") setFilter({ text: "", active: true })
+    else if (typed === "?") setShowHelp(true)
+    else if (key.name === "escape") setFilter(NO_FILTER)
+    else if (key.name === "q") onQuit()
     else if (!runAction(key.name, { kind, item: selectedItem, context, start }))
       dispatch({ name: key.name, harnessCount: adapters.length, listLength: visible.length })
   })
@@ -84,7 +99,9 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
     <box flexDirection="column" border width="100%" height="100%">
       <Header project={tildePath(roots.project, roots.home)} scope={scope} />
       <Tabs kind={kind} />
-      {screen.name !== "list" ? (
+      {showHelp ? (
+        <Help />
+      ) : screen.name !== "list" ? (
         <box border flexGrow={1} flexShrink={1} overflow="hidden">
           <ActiveScreen screen={screen} context={context} backupRoot={backupRoot} onApplied={onApplied} />
         </box>
@@ -106,6 +123,7 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
         </box>
       )}
       {message.text && <text flexShrink={0} fg={message.error ? ERROR : ACCENT}>{` ${message.text}`}</text>}
+      {(filter.active || filter.text) && <text flexShrink={0} fg={ACCENT}>{` filter: ${filter.text}${filter.active ? "▌" : ""}`}</text>}
       <text flexShrink={0} fg={DIM}>{` ${STATUS[screen.name === "list" ? kind : screen.name]}`}</text>
     </box>
   )
@@ -180,6 +198,31 @@ function ActiveScreen({ screen, context, backupRoot, onApplied }: ActiveScreenPr
 
 const START_VIEW: ViewState = { kind: "memory", scope: "global", focus: "list", harnessIndex: 0, listIndex: 0 }
 const STEPS: Record<string, number> = { up: -1, down: 1 }
+
+// While typing a filter: enter keeps it, esc clears it, backspace deletes, one printable character adds.
+function filterKey(filter: typeof NO_FILTER, name: string, typed: string): typeof NO_FILTER {
+  if (name === "return") return { ...filter, active: false }
+  if (name === "escape") return NO_FILTER
+  if (name === "backspace") return { ...filter, text: filter.text.slice(0, -1) }
+  return typed.length === 1 && typed >= " " ? { ...filter, text: filter.text + typed } : filter
+}
+
+const HELP_TABS: [string, string][] = [
+  ["Memory", STATUS.memory!],
+  ["MCP", STATUS.mcp!],
+  ["Skills", STATUS.skill!],
+  ["Plugins", STATUS.plugin!],
+]
+
+function Help() {
+  return (
+    <box border flexGrow={1} flexDirection="column" paddingLeft={1}>
+      <text fg={ACCENT}>Keys (any key closes)</text>
+      {HELP_TABS.map(([tab, keys]) => <text key={tab}>{`${tab.padEnd(9)}${keys}`}</text>)}
+      <text>{"Everywhere / filter by name  ? help  esc clears the filter"}</text>
+    </box>
+  )
+}
 
 function pressKey(view: ViewState, key: KeyPress): ViewState {
   const kind = KIND_KEYS[key.name]

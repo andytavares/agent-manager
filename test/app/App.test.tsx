@@ -123,3 +123,42 @@ test("a long detail text stays inside its pane and keeps the header visible", as
     setup.renderer.destroy()
   }
 })
+
+test("/ filters the list by name; esc clears the filter", async () => {
+  const setup = await renderApp()
+  try {
+    setup.mockInput.pressKey("2")
+    await setup.waitForFrame((f) => f.includes("playwright"))
+    setup.mockInput.pressKey("/")
+    await setup.mockInput.typeText("play")
+    await setup.renderOnce()
+    const filtered = setup.captureCharFrame()
+    expect(filtered).toContain("filter: play")
+    expect(filtered).toContain("playwright")
+    expect(filtered).not.toContain("linear      http") // the list row, not the detail pane
+    setup.mockInput.pressEscape() // a lone escape is delivered after a short delay
+    let cleared = ""
+    for (let tries = 0; tries < 40 && !cleared.includes("linear      http"); tries++) {
+      await Bun.sleep(25)
+      await setup.renderOnce()
+      cleared = setup.captureCharFrame()
+    }
+    expect(cleared).toContain("linear      http")
+    expect(cleared).not.toContain("filter:")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("? shows the keys for every tab", async () => {
+  const setup = await renderApp()
+  try {
+    await setup.waitForFrame((f) => f.includes("CLAUDE.md"))
+    setup.mockInput.pressKey("?")
+    const help = await setup.waitForFrame((f) => f.includes("Keys"))
+    expect(help).toContain("i install")
+    expect(help).toContain("c copy to")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
