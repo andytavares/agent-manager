@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { claudeCode } from "../../src/adapters/claude-code"
-import type { Change, FileEdit, Item, Kind, Roots, WritePlan } from "../../src/core/model"
+import type { Change, FileEdit, Item, Kind, McpServer, Roots, Scope, WritePlan } from "../../src/core/model"
 
 // A temp copy, because the auto memory folder name and some JSON keys hold absolute paths.
 let base: string
@@ -259,10 +259,145 @@ test("deleting an auto memory entry removes its MEMORY.md lines; deleting MEMORY
   })
 })
 
-test("plan throws for kinds other than memory", async () => {
-  await expect(claudeCode.plan({ ...memoryChange({ op: "create" }), kind: "mcp" }, roots())).rejects.toThrow(
-    "Claude Code: mcp changes are not supported yet",
+test("plan throws for plugin changes", async () => {
+  await expect(claudeCode.plan({ ...memoryChange({ op: "create" }), kind: "plugin" }, roots())).rejects.toThrow(
+    "Claude Code: plugin changes are not supported yet",
   )
+})
+
+const RESTART = "Restart Claude Code sessions to load this change."
+const stdioServer = (fields: Partial<McpServer> = {}): McpServer => ({
+  name: "new",
+  transport: "stdio",
+  enabled: true,
+  command: "new-mcp",
+  args: ["--fast"],
+  env: { KEY: "${KEY}" },
+  native: { timeout: 10, type: "ws", command: "native-wins" },
+  ...fields,
+})
+const STDIO_ENTRY = { timeout: 10, type: "stdio", command: "new-mcp", args: ["--fast"], env: { KEY: "${KEY}" } }
+const mcpChange = (scope: Scope, fields: Partial<Change> & Pick<Change, "op">): Change => ({
+  kind: "mcp",
+  target: { harness: "claude-code", scope },
+  ...fields,
+})
+const claudeCommand = (...args: string[]) => ({ argv: ["claude", "mcp", ...args], touches: [join(home, ".claude.json")], cwd: project })
+const previewServers = (plan: WritePlan, scope: Scope) => {
+  const [edit] = plan.edits
+  expect(edit).toMatchObject({ path: join(home, ".claude.json"), before: readFileSync(join(home, ".claude.json"), "utf8"), previewOnly: true })
+  const file = JSON.parse(edit!.after!)
+  return scope === "global" ? file.mcpServers : file.projects[project].mcpServers
+}
+
+test("creating a user or local server runs claude mcp add-json and previews .claude.json", async () => {
+  const user = await claudeCode.plan(mcpChange("global", { op: "create", server: stdioServer() }), roots())
+  expect(user.commands).toEqual([claudeCommand("add-json", "-s", "user", "new", JSON.stringify(STDIO_ENTRY))])
+  expect(previewServers(user, "global")).toEqual({ linear: { type: "sse", url: "https://mcp.linear.app/sse" }, new: STDIO_ENTRY })
+  expect(user.notices).toEqual([RESTART])
+  const http = stdioServer({ transport: "http", url: "https://x.dev/mcp", headers: { A: "${B}" }, native: {} })
+  const local = await claudeCode.plan(mcpChange("local", { op: "create", server: http }), roots())
+  const httpEntry = { type: "http", url: "https://x.dev/mcp", headers: { A: "${B}" } }
+  expect(local.commands).toEqual([claudeCommand("add-json", "-s", "local", "new", JSON.stringify(httpEntry))])
+  expect(previewServers(local, "local")).toEqual({ db: { command: "db-mcp" }, new: httpEntry })
+  expect(local.notices).toEqual([RESTART])
+})
+
+test("updating a user server removes then adds it; a local rename removes the old name", async () => {
+  const items = await list("mcp")
+  const linear = { name: "linear", transport: "sse", enabled: true, url: "https://new.dev/sse", native: {} } satisfies McpServer
+  const update = await claudeCode.plan(mcpChange("global", { op: "update", item: byName(items, "linear"), server: linear }), roots())
+  const sseEntry = { type: "sse", url: "https://new.dev/sse" }
+  expect(update.commands).toEqual([
+    claudeCommand("remove", "-s", "user", "linear"),
+    claudeCommand("add-json", "-s", "user", "linear", JSON.stringify(sseEntry)),
+  ])
+  expect(previewServers(update, "global")).toEqual({ linear: sseEntry })
+  const renamed = stdioServer({ name: "db2", native: {} })
+  const rename = await claudeCode.plan(mcpChange("local", { op: "update", item: byName(items, "db"), server: renamed }), roots())
+  const { timeout, ...entry } = STDIO_ENTRY
+  expect(rename.commands).toEqual([claudeCommand("remove", "-s", "local", "db"), claudeCommand("add-json", "-s", "local", "db2", JSON.stringify(entry))])
+  expect(previewServers(rename, "local")).toEqual({ db2: entry })
+  expect(rename.notices).toEqual([RESTART])
+})
+
+test("deleting a user server runs claude mcp remove and previews the entry gone", async () => {
+  const plan = await claudeCode.plan(mcpChange("global", { op: "delete", item: byName(await list("mcp"), "linear") }), roots())
+  expect(plan.commands).toEqual([claudeCommand("remove", "-s", "user", "linear")])
+  expect(previewServers(plan, "global")).toEqual({})
+  expect(plan.notices).toEqual([RESTART])
+})
+
+test("turning off a user or local server throws", async () => {
+  const message = "Claude Code: user and local servers cannot be turned off; delete the server instead"
+  const off = stdioServer({ enabled: false })
+  await expect(claudeCode.plan(mcpChange("global", { op: "create", server: off }), roots())).rejects.toThrow(message)
+  const db = byName(await list("mcp"), "db")
+  await expect(claudeCode.plan(mcpChange("local", { op: "update", item: db, server: off }), roots())).rejects.toThrow(message)
+})
+
+test("a read-only server is refused with its reason", async () => {
+  const sock = byName(await list("mcp"), "sock")
+  await expect(claudeCode.plan(mcpChange("project", { op: "delete", item: sock }), roots())).rejects.toThrow("ws transport")
+})
+
+test("a project server is added to an existing .mcp.json, keeping other keys and formatting", async () => {
+  const path = join(project, ".mcp.json")
+  const before = readFileSync(path, "utf8")
+  const plan = await claudeCode.plan(mcpChange("project", { op: "create", server: stdioServer() }), roots())
+  expect(plan.commands).toEqual([])
+  expect(plan.notices).toEqual([RESTART])
+  const [edit] = plan.edits
+  expect(edit).toMatchObject({ path, before })
+  expect(edit!.previewOnly).toBeUndefined()
+  expect(edit!.after).toContain(`    "files": { "command": "files-mcp", "args": ["--root", "."], "env": { "TOKEN": "\${TOKEN}" }, "timeout": 5000 },\n`)
+  const servers = JSON.parse(edit!.after!).mcpServers
+  expect(Object.keys(servers)).toEqual(["files", "off-server", "sock", "remote", "new"])
+  expect(servers.new).toEqual(STDIO_ENTRY)
+})
+
+test("a project server creates .mcp.json when absent; delete removes the key", async () => {
+  const empty = join(base, "project-empty")
+  mkdirSync(empty)
+  const plan = await claudeCode.plan(mcpChange("project", { op: "create", server: stdioServer() }), roots({ project: empty }))
+  expect(plan.edits).toHaveLength(1)
+  expect(plan.edits[0]).toMatchObject({ path: join(empty, ".mcp.json"), before: null })
+  expect(JSON.parse(plan.edits[0]!.after!)).toEqual({ mcpServers: { new: STDIO_ENTRY } })
+  const files = byName(await list("mcp"), "files")
+  const remove = await claudeCode.plan(mcpChange("project", { op: "delete", item: files }), roots())
+  expect(Object.keys(JSON.parse(remove.edits[0]!.after!).mcpServers)).toEqual(["off-server", "sock", "remote"])
+  expect(remove.notices).toEqual([RESTART])
+})
+
+test("turning a project server off or on edits disabledMcpjsonServers only", async () => {
+  const items = await list("mcp")
+  const files = byName(items, "files")
+  const filesServer = ((await claudeCode.read(files)) as { server: McpServer }).server
+  const off = await claudeCode.plan(mcpChange("project", { op: "update", item: files, server: { ...filesServer, enabled: false } }), roots())
+  const localPath = join(project, ".claude/settings.local.json")
+  expect(off.edits).toHaveLength(1)
+  expect(off.edits[0]).toMatchObject({ path: localPath, before: readFileSync(localPath, "utf8") })
+  expect(JSON.parse(off.edits[0]!.after!)).toEqual({ enabledPlugins: { "gamma@mkt": true }, disabledMcpjsonServers: ["files"] })
+  expect(off.notices).toEqual([RESTART])
+  const offServer = byName(items, "off-server")
+  const offRead = ((await claudeCode.read(offServer)) as { server: McpServer }).server
+  const on = await claudeCode.plan(mcpChange("project", { op: "update", item: offServer, server: { ...offRead, enabled: true } }), roots())
+  const sharedPath = join(project, ".claude/settings.json")
+  expect(on.edits).toHaveLength(1)
+  expect(on.edits[0]!.path).toBe(sharedPath)
+  expect(JSON.parse(on.edits[0]!.after!)).toEqual({ enabledPlugins: { "beta@mkt": false, "gamma@mkt": false }, disabledMcpjsonServers: [] })
+})
+
+test("turning a project server off creates settings.local.json when absent", async () => {
+  const fresh = join(base, "project-fresh")
+  mkdirSync(fresh)
+  writeFileSync(join(fresh, ".mcp.json"), '{ "mcpServers": { "files": { "command": "files-mcp" } } }')
+  const files = byName(await list("mcp", roots({ project: fresh })), "files")
+  const server: McpServer = { name: "files", transport: "stdio", enabled: false, command: "files-mcp", native: {} }
+  const plan = await claudeCode.plan(mcpChange("project", { op: "update", item: files, server }), roots({ project: fresh }))
+  expect(plan.edits).toHaveLength(1)
+  expect(plan.edits[0]).toMatchObject({ path: join(fresh, ".claude/settings.local.json"), before: null })
+  expect(JSON.parse(plan.edits[0]!.after!)).toEqual({ disabledMcpjsonServers: ["files"] })
 })
 
 test("memoryFiles and skillRoots", async () => {
@@ -271,4 +406,10 @@ test("memoryFiles and skillRoots", async () => {
     { path: join(home, ".claude/skills"), scope: "global" },
     { path: join(project, ".claude/skills"), scope: "project" },
   ])
+})
+
+test("a project create refuses a name that .mcp.json already holds", async () => {
+  await expect(claudeCode.plan(mcpChange("project", { op: "create", server: stdioServer({ name: "files" }) }), roots())).rejects.toThrow(
+    "Claude Code: files already exists in",
+  )
 })

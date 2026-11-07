@@ -1,10 +1,12 @@
 import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
-import { parse, type ParseError } from "jsonc-parser"
+import { isDeepStrictEqual } from "node:util"
+import { applyEdits, modify, parse, type JSONPath, type ParseError } from "jsonc-parser"
 import {
   HARNESS_LABELS,
   type Change,
+  type FileEdit,
   type HarnessAdapter,
   type Item,
   type Kind,
@@ -232,7 +234,88 @@ async function planAutoDelete(item: Item, autoDir: string): Promise<WritePlan> {
   return plan
 }
 
+const RESTART_NOTICE = "Restart Claude Code sessions to load this change."
+const JSON_FORMAT = { formattingOptions: { insertSpaces: true, tabSize: 2 } }
+
+// value undefined removes the key; the rest of the text keeps its formatting.
+function setJson(text: string, path: JSONPath, value: unknown): string {
+  return applyEdits(text, modify(text, path, value, JSON_FORMAT))
+}
+
+// native goes first so harness-only keys survive but never override type, command or url.
+function serverEntry({ transport, command, args, env, url, headers, native }: McpServer): Json {
+  const fields = transport === "stdio" ? { command, args, env } : { url, headers }
+  return Object.fromEntries(Object.entries({ ...native, type: transport, ...fields }).filter(([, value]) => value !== undefined))
+}
+
+// ~/.claude.json is locked by running sessions, so user and local servers change through the claude CLI.
+async function planCliMcp(change: Change, roots: Roots): Promise<WritePlan> {
+  const { op, item, server, target } = change
+  if (op !== "delete" && !server!.enabled) throw new Error(`${LABEL}: user and local servers cannot be turned off; delete the server instead`)
+  const { claudeJson } = configPaths(roots)
+  const cliScope = target.scope === "global" ? "user" : "local"
+  const serversPath = target.scope === "global" ? ["mcpServers"] : ["projects", roots.project, "mcpServers"]
+  const command = (...args: string[]) => ({ argv: ["claude", "mcp", ...args], touches: [claudeJson], cwd: roots.project })
+  const before = await readText(claudeJson)
+  let after = before ?? "{}"
+  const plan = emptyPlan()
+  if (op !== "create") {
+    plan.commands.push(command("remove", "-s", cliScope, item!.name))
+    after = setJson(after, [...serversPath, item!.name], undefined)
+  }
+  if (op !== "delete") {
+    const entry = serverEntry(server!)
+    plan.commands.push(command("add-json", "-s", cliScope, server!.name, JSON.stringify(entry)))
+    after = setJson(after, [...serversPath, server!.name], entry)
+  }
+  plan.edits.push({ path: claudeJson, before, after, previewOnly: true })
+  return plan
+}
+
+// Off adds the name to settings.local.json; on removes it from every settings file that lists it.
+async function planDisabledList(roots: Roots, name: string, enabled: boolean): Promise<FileEdit[]> {
+  const paths = enabled ? settingsFiles(roots, configPaths(roots).configDir) : [join(roots.project, ".claude/settings.local.json")]
+  const edits = await Promise.all(
+    paths.map(async (path): Promise<FileEdit | undefined> => {
+      const before = await readText(path)
+      const list: string[] = parse(before ?? "{}")?.disabledMcpjsonServers ?? []
+      if (enabled !== list.includes(name)) return undefined
+      const next = enabled ? list.filter((entry) => entry !== name) : [...list, name]
+      return { path, before, after: setJson(before ?? "{}", ["disabledMcpjsonServers"], next) }
+    }),
+  )
+  return edits.filter((edit) => edit !== undefined)
+}
+
+async function planProjectMcp(change: Change, roots: Roots): Promise<WritePlan> {
+  const { op, item, server } = change
+  const path = join(roots.project, ".mcp.json")
+  const before = await readText(path)
+  let after = before ?? '{ "mcpServers": {} }'
+  const renamed = op === "update" && item!.name !== server!.name
+  if ((op === "create" || renamed) && parse(after)?.mcpServers?.[server!.name]) throw new Error(`${LABEL}: ${server!.name} already exists in ${path}`)
+  const unchanged =
+    op === "update" && item!.name === server!.name && isDeepStrictEqual(serverEntry(await readServer(item!)), serverEntry(server!))
+  if (op === "delete" || renamed) after = setJson(after, ["mcpServers", item!.name], undefined)
+  if (op !== "delete" && !unchanged) after = setJson(after, ["mcpServers", server!.name], serverEntry(server!))
+  const plan = emptyPlan()
+  if (after !== before) plan.edits.push({ path, before, after })
+  const wasEnabled = op === "create" || !item!.offIn?.includes(ID)
+  if (op !== "delete" && server!.enabled !== wasEnabled) plan.edits.push(...(await planDisabledList(roots, server!.name, server!.enabled)))
+  return plan
+}
+
+async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
+  const { op, item, target } = change
+  if (op === "move" || op === "copy") throw new Error(`${LABEL}: MCP servers cannot ${op}`)
+  if (item?.readOnly) throw new Error(`${LABEL}: ${item.name} is read-only (${item.readOnly})`)
+  const plan = target.scope === "project" ? await planProjectMcp(change, roots) : await planCliMcp(change, roots)
+  plan.notices.push(RESTART_NOTICE)
+  return plan
+}
+
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
+  if (change.kind === "mcp") return planMcp(change, roots)
   if (change.kind !== "memory") throw new Error(`${LABEL}: ${change.kind} changes are not supported yet`)
   const { configDir } = configPaths(roots)
   const autoDir = autoMemoryDir(roots, configDir, (await readJson(join(configDir, "settings.json"))) ?? {})
