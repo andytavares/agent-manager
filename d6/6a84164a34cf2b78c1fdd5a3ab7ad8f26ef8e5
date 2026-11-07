@@ -1,0 +1,31 @@
+src/adapters/codex.ts
+  s_b67d2564e0abf8::t_df6d85d7eb54fd 5,10-15,92,146-148,151,208-239,247-249
+src/adapters/claude-code.ts
+  s_b67d2564e0abf8::t_1a1518d6eccbfc 3,206,228
+  s_b67d2564e0abf8::t_4511011eaa682f 5-16,21,65,67-73,192-205,207-226,229-259,271,273-280
+  s_b67d2564e0abf8::t_2a134c237e51d2 227
+  s_b67d2564e0abf8::t_4f71f515592c33 260-261
+test/adapters/codex.test.ts
+  s_b67d2564e0abf8::t_64d17b9ce1b753 2,173-178,180-232
+  s_b67d2564e0abf8::t_d97a6651fcc628 6,179
+test/adapters/claude-code.test.ts
+  s_b67d2564e0abf8::t_4dfe2f7f9d2a0f 204-207,224-225,263
+  s_b67d2564e0abf8::t_f9f743924c7f8c 2,184-189,191-203,208-223,226-262,264-274
+  s_b67d2564e0abf8::t_d97a6651fcc628 6,190
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d66a84164a34cf2b78c1fdd5a3ab7ad8f26ef8e5",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
