@@ -11,6 +11,7 @@ const { App } = await import("../../src/app/App")
 let home: string
 let roots: Roots
 let otherData: string
+let lostData: string
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "agent-manager-projects-"))
@@ -18,6 +19,8 @@ beforeEach(() => {
   otherData = join(home, ".claude/projects/-other")
   mkdirSync(join(otherData, "memory"), { recursive: true })
   writeFileSync(join(otherData, "memory/MEMORY.md"), "Remembered\n")
+  lostData = join(home, ".claude/projects/-lost")
+  mkdirSync(lostData, { recursive: true })
 })
 
 afterEach(() => {
@@ -25,6 +28,7 @@ afterEach(() => {
 })
 
 // Each project has one memory file named after its folder; the third project's folder is unknown.
+// A project is listed while its data folder exists, except the current one, so a deletion shows.
 function fakeAdapter(): HarnessAdapter {
   return {
     id: "claude-code",
@@ -39,11 +43,12 @@ function fakeAdapter(): HarnessAdapter {
     plan: async () => EMPTY_PLAN,
     memoryFiles: {},
     skillRoots: async () => [],
-    projects: async () => [
-      { path: join(home, "repo"), dataDir: join(home, ".claude/projects/-repo") },
-      { path: join(home, "other"), dataDir: otherData },
-      { dataDir: join(home, ".claude/projects/-lost") },
-    ],
+    projects: async () =>
+      [
+        { path: join(home, "repo"), dataDir: join(home, ".claude/projects/-repo") },
+        { path: join(home, "other"), dataDir: otherData },
+        { dataDir: lostData },
+      ].filter((project) => project.path === join(home, "repo") || existsSync(project.dataDir)),
   }
 }
 
@@ -104,9 +109,11 @@ test("d moves the project's data folder into the backup", async () => {
     const review = await waitForText(setup, "moved to backup")
     expect(review).toContain("~/.claude/projects/-other")
     setup.mockInput.pressEnter()
-    await waitForText(setup, "Saved")
+    const after = await waitForText(setup, "Saved")
     expect(existsSync(otherData)).toBe(false)
     expect(existsSync(join(home, "backups"))).toBe(true)
+    expect(after).toContain("Projects") // back on the project list, refreshed
+    expect(after).not.toContain("~/other")
   } finally {
     setup.renderer.destroy()
   }
@@ -120,6 +127,61 @@ test("a project whose folder is unknown cannot be opened", async () => {
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressEnter()
     await waitForText(setup, "Cannot open -lost: its project folder is unknown.")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("space marks several projects and d deletes them in one review", async () => {
+  const setup = await renderApp()
+  try {
+    await openProjects(setup)
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressKey(" ")
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressKey(" ")
+    const marked = await waitForText(setup, "2 marked")
+    expect(marked).toContain("● ~/other")
+    expect(marked).toContain("● -lost")
+    setup.mockInput.pressKey("d")
+    const review = await waitForText(setup, "2 changes")
+    expect(review).toContain("~/.claude/projects/-other")
+    expect(review).toContain("~/.claude/projects/-lost")
+    setup.mockInput.pressEnter()
+    const after = await waitForText(setup, "Saved")
+    expect(existsSync(otherData)).toBe(false)
+    expect(existsSync(lostData)).toBe(false)
+    expect(after).toContain("Projects")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("space on a marked project unmarks it", async () => {
+  const setup = await renderApp()
+  try {
+    await openProjects(setup)
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressKey(" ")
+    await waitForText(setup, "1 marked")
+    setup.mockInput.pressKey(" ")
+    const frame = await waitForText(setup, "  ~/other")
+    expect(frame).not.toContain("1 marked")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("esc on the review goes back to the project list", async () => {
+  const setup = await renderApp()
+  try {
+    await openProjects(setup)
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressKey("d")
+    await waitForText(setup, "moved to backup")
+    setup.mockInput.pressEscape()
+    await waitForText(setup, ".claude/projects/-lost")
+    expect(existsSync(otherData)).toBe(true)
   } finally {
     setup.renderer.destroy()
   }
