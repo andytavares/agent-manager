@@ -1,21 +1,23 @@
 import { dirname } from "node:path"
 import { stringify } from "yaml"
-import { HARNESS_LABELS, type Change, type HarnessAdapter, type Item, type Roots, type Scope, type WritePlan } from "../core/model"
+import { HARNESS_LABELS, type Change, type HarnessAdapter, type Item, type McpServer, type Roots, type Scope, type WritePlan } from "../core/model"
 import { skillRootChoices } from "../core/registry"
 import { tildePath } from "./ItemList"
+import type { McpTarget } from "./McpForm"
 import type { PromptStep } from "./Prompt"
 
 export type Screen =
   | { name: "list" }
   | { name: "prompt"; title: string; nextStep: (answers: string[]) => PromptStep | null; onDone: (answers: string[]) => void }
   | { name: "editor"; title: string; initialText: string; toChange: (text: string) => Change }
-  | { name: "review"; plan: WritePlan }
+  | { name: "mcpForm"; title: string; server: McpServer; targets: McpTarget[]; fixed?: boolean; toChanges: (server: McpServer, targets: McpTarget[]) => Change[] }
+  | { name: "review"; plan: WritePlan; secrets: string[] } // secrets: literal values masked until revealed
 
 export interface FlowContext {
   adapters: HarnessAdapter[] // detected adapters only
   roots: Roots
   scope: "global" | "project"
-  review: (change: Change) => void // plans the change and opens the review screen
+  review: (...changes: Change[]) => void // plans each change and opens one review screen
   open: (screen: Screen) => void
 }
 
@@ -94,4 +96,62 @@ export async function relocateSkill(item: Item, op: "copy" | "move", context: Fl
     nextStep: (answers) => (answers.length ? null : { label: "Root", options }),
     onDone: ([destination]) => context.review({ kind: "skill", op, target: target(item), item, destination }),
   }
+}
+
+const EMPTY_SERVER: McpServer = { name: "", transport: "stdio", enabled: true, native: {} }
+
+async function readServer(item: Item, context: FlowContext): Promise<McpServer> {
+  const detail = await context.adapters.find((adapter) => adapter.id === item.harness)!.read(item)
+  if (detail.type !== "mcp") throw new Error(`${item.name} is not an MCP server.`)
+  return detail.server
+}
+
+// Unchecked, at the view's scope when the harness has it.
+function mcpTargets(adapters: HarnessAdapter[], scope: Scope): McpTarget[] {
+  return adapters.map((adapter) => ({ harness: adapter.id, scope: adapter.scopes.includes(scope) ? scope : adapter.scopes[0]!, checked: false }))
+}
+
+function createChanges(server: McpServer, targets: McpTarget[]): Change[] {
+  return targets.map(({ harness, scope }) => ({ kind: "mcp", op: "create", target: { harness, scope }, server }))
+}
+
+function addMcp(context: FlowContext): Screen {
+  return { name: "mcpForm", title: "Add MCP server", server: EMPTY_SERVER, targets: mcpTargets(context.adapters, context.scope), toChanges: createChanges }
+}
+
+async function editMcp(item: Item, context: FlowContext): Promise<Screen> {
+  const server = await readServer(item, context)
+  const toChanges = (edited: McpServer): Change[] => [{ kind: "mcp", op: "update", target: target(item), item, server: edited }]
+  return { name: "mcpForm", title: `Edit ${item.name}`, server, targets: [{ ...target(item), checked: true }], fixed: true, toChanges }
+}
+
+async function copyMcp(item: Item, context: FlowContext): Promise<Screen> {
+  const server = await readServer(item, context)
+  const others = context.adapters.filter((adapter) => adapter.id !== item.harness)
+  return { name: "mcpForm", title: `Copy ${item.name} to…`, server, targets: mcpTargets(others, context.scope), toChanges: createChanges }
+}
+
+async function toggleMcp(item: Item, context: FlowContext): Promise<void> {
+  const server = await readServer(item, context)
+  context.review({ kind: "mcp", op: "update", target: target(item), item, server: { ...server, enabled: !server.enabled } })
+}
+
+// The server rides along only so that review can mask its secrets.
+async function deleteMcp(item: Item, context: FlowContext): Promise<void> {
+  context.review({ kind: "mcp", op: "delete", target: target(item), item, server: await readServer(item, context) })
+}
+
+const MCP_ITEM_ACTIONS: Record<string, (item: Item, context: FlowContext) => Promise<Screen | void>> = {
+  e: editMcp,
+  return: editMcp,
+  c: copyMcp,
+  d: deleteMcp,
+  space: toggleMcp,
+}
+
+// MCP keys on the list; undefined when the key is not an action.
+export function runMcpAction(name: string, item: Item | undefined, context: FlowContext): Screen | Promise<Screen | void> | undefined {
+  if (name === "a") return addMcp(context)
+  const action = MCP_ITEM_ACTIONS[name]
+  return item && action ? action(item, context) : undefined
 }

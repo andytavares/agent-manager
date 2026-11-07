@@ -83,7 +83,7 @@ export interface Change {
   name?: string // create: memory file name (from memoryFiles, "<name>" filled) or skill folder name
   text?: string // full new text: memory file or SKILL.md
   destination?: string // move, copy: destination skill root
-  server?: McpServer // mcp create, update
+  server?: McpServer // mcp create, update; on delete only for masking secrets in review
   plugin?: PluginInfo // plugin changes
 }
 

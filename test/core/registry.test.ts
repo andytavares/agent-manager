@@ -2,7 +2,7 @@ import { expect, test } from "bun:test"
 import { EMPTY_PLAN, fakeSkills } from "../app/fake-skills"
 import type { Change, HarnessAdapter, HarnessId, Item, Kind, Roots, Scope } from "../../src/core/model"
 
-const { listItems, maskSecret, planChange, skillRootChoices } = await import("../../src/core/registry")
+const { listItems, maskSecret, mergePlans, planChange, skillRootChoices } = await import("../../src/core/registry")
 
 const roots: Roots = { home: "/home/u", project: "/home/u/repo", env: {} }
 
@@ -164,4 +164,20 @@ test("skillRootChoices lists each root of a scope once with the harnesses readin
     { path: agentsRoot.path, readers: ["codex", "opencode"] },
   ])
   expect(await skillRootChoices(skillAdapters, roots, "project")).toEqual([{ path: projectRoot.path, readers: ["codex"] }])
+})
+
+test("mergePlans concatenates every list and keeps each notice once", () => {
+  const restart = "Restart sessions."
+  const merged = mergePlans([
+    { ...EMPTY_PLAN, edits: [{ path: "/a", before: null, after: "a" }], removals: ["/old"], notices: [restart] },
+    { ...EMPTY_PLAN, commands: [{ argv: ["claude", "mcp", "remove", "x"], touches: [] }], moves: [{ from: "/m", to: "/n" }], copies: [{ from: "/c", to: "/d" }], notices: [restart, "Trust the project."] },
+  ])
+  expect(merged).toEqual({
+    edits: [{ path: "/a", before: null, after: "a" }],
+    moves: [{ from: "/m", to: "/n" }],
+    copies: [{ from: "/c", to: "/d" }],
+    removals: ["/old"],
+    commands: [{ argv: ["claude", "mcp", "remove", "x"], touches: [] }],
+    notices: [restart, "Trust the project."],
+  })
 })

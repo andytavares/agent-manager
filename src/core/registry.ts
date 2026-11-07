@@ -6,6 +6,7 @@ import {
   type HarnessId,
   type Item,
   type Kind,
+  type McpServer,
   type Roots,
   type Scope,
   type WritePlan,
@@ -88,4 +89,22 @@ function union<T>(left: T[], right: T[]): T[] {
 // Values made only of env references (${VAR}) are safe to show; anything else may be a literal secret.
 export function maskSecret(value: string): string {
   return value.includes("${") ? value : "••••••••"
+}
+
+// Env and header values of a server that maskSecret would hide.
+export function literalSecrets(server: McpServer | undefined): string[] {
+  const values = [...Object.values(server?.env ?? {}), ...Object.values(server?.headers ?? {})]
+  return values.filter((value) => value && maskSecret(value) !== value)
+}
+
+// One plan for one review, from one plan per target.
+export function mergePlans(plans: WritePlan[]): WritePlan {
+  return {
+    edits: plans.flatMap((plan) => plan.edits),
+    moves: plans.flatMap((plan) => plan.moves),
+    copies: plans.flatMap((plan) => plan.copies),
+    removals: plans.flatMap((plan) => plan.removals),
+    commands: plans.flatMap((plan) => plan.commands),
+    notices: union([], plans.flatMap((plan) => plan.notices)),
+  }
 }

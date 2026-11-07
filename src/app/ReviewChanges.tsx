@@ -7,6 +7,7 @@ import { ACCENT, DIM, tildePath } from "./ItemList"
 
 interface ReviewChangesProps {
   plan: WritePlan
+  secrets: string[] // shown as "••••••••" until r is pressed
   backupRoot: string
   home: string
   onApplied: (message: string) => void
@@ -14,10 +15,12 @@ interface ReviewChangesProps {
 }
 
 // Nothing is written until enter is pressed on this screen.
-export function ReviewChanges({ plan, backupRoot, home, onApplied, onBack }: ReviewChangesProps) {
+export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBack }: ReviewChangesProps) {
   const [error, setError] = useState("")
+  const [revealed, setRevealed] = useState(false)
   useKeyboard((key) => {
     if (key.name === "escape") onBack()
+    if (key.name === "r") setRevealed(!revealed)
     if (key.name !== "return") return
     applyPlan(plan, { backupRoot }).then(
       ({ backupDir, notices }) => onApplied([`Saved. Backup › ${tildePath(backupDir, home)}`, ...notices].join("  ")),
@@ -25,17 +28,19 @@ export function ReviewChanges({ plan, backupRoot, home, onApplied, onBack }: Rev
     )
   })
   const path = (value: string) => tildePath(value, home)
+  const mask = (text: string) => (revealed ? text : hideSecrets(text, secrets))
   return (
     <box flexDirection="column" paddingLeft={1}>
       <text>
         <span fg={ACCENT}>{`${changeCount(plan)} changes`}</span>
         <span fg={DIM}>  nothing is written until you press enter</span>
+        {secrets.length > 0 && <span fg={DIM}>{`  r ${revealed ? "hides" : "shows"} secrets`}</span>}
       </text>
-      {plan.edits.map((edit) => <EditDiff key={edit.path} edit={edit} home={home} />)}
+      {plan.edits.map((edit) => <EditDiff key={edit.path} edit={edit} home={home} mask={mask} />)}
       {plan.moves.map(({ from, to }) => <Line key={from} label="move" text={`${path(from)} → ${path(to)}`} />)}
       {plan.copies.map(({ from, to }) => <Line key={from} label="copy" text={`${path(from)} → ${path(to)}`} />)}
       {plan.removals.map((removal) => <Line key={removal} label="moved to backup" text={path(removal)} />)}
-      {plan.commands.map(({ argv }) => <Line key={argv.join(" ")} label="run command" text={argv.join(" ")} />)}
+      {plan.commands.map(({ argv }) => <Line key={argv.join(" ")} label="run command" text={mask(argv.join(" "))} />)}
       <Line label="Backup ›" text={`${path(backupRoot)}/…`} />
       {error && <text fg="#ff5f5f">{error}</text>}
     </box>
@@ -51,13 +56,17 @@ function changeCount(plan: WritePlan): number {
   return plan.edits.length + plan.moves.length + plan.copies.length + plan.removals.length + plan.commands.length
 }
 
-function EditDiff({ edit, home }: { edit: FileEdit; home: string }) {
+function hideSecrets(text: string, secrets: string[]): string {
+  return secrets.reduce((masked, secret) => masked.replaceAll(secret, "••••••••"), text)
+}
+
+function EditDiff({ edit, home, mask }: { edit: FileEdit; home: string; mask: (text: string) => string }) {
   const label = edit.before === null ? "new file" : edit.after === null ? "delete" : "edit"
   const patch = createTwoFilesPatch(edit.path, edit.path, edit.before ?? "", edit.after ?? "")
   return (
     <box flexDirection="column">
       <Line label={label} text={tildePath(edit.path, home)} />
-      <diff diff={patch} view="unified" showLineNumbers={false} />
+      <diff diff={mask(patch)} view="unified" showLineNumbers={false} />
     </box>
   )
 }

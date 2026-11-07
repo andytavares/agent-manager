@@ -1,11 +1,12 @@
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useReducer, useState } from "react"
 import { defaultBackupRoot } from "../core/apply"
-import type { HarnessAdapter, HarnessId, Item, Kind, Roots } from "../core/model"
-import { listItems, planChange } from "../core/registry"
+import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots } from "../core/model"
+import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
-import { addMemory, deleteItem, editItem, type FlowContext, newSkill, relocateSkill, type Screen } from "./flows"
+import { addMemory, deleteItem, editItem, type FlowContext, newSkill, relocateSkill, runMcpAction, type Screen } from "./flows"
 import { ACCENT, DIM, ItemList, SELECTED_BG, tildePath } from "./ItemList"
+import { McpForm, type McpTarget } from "./McpForm"
 import { Prompt } from "./Prompt"
 import { ReviewChanges } from "./ReviewChanges"
 import { TextEditor } from "./TextEditor"
@@ -21,10 +22,11 @@ const LIST_KEYS = "1-4 kind  s scope  tab next pane  ↑↓ move  q quit"
 const STATUS: Record<string, string> = {
   memory: `a add  e/enter edit  d delete  ${LIST_KEYS}`,
   skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}`,
-  mcp: LIST_KEYS,
+  mcp: `a add  e edit  c copy to…  d delete  space on/off  ${LIST_KEYS}`,
   plugin: LIST_KEYS,
   prompt: "↑↓ choose  enter next  esc cancel",
   editor: "ctrl+s review & save  esc discard",
+  mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel",
   review: "enter apply  esc back",
 }
 
@@ -52,12 +54,15 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
     setMessage({ text: error.message, error: true })
     setScreen(LIST)
   }
-  const start = (next: Screen | Promise<Screen>) => Promise.resolve(next).then(setScreen, fail)
+  const start = (next: Screen | Promise<Screen | void>) => Promise.resolve(next).then((screen) => screen && setScreen(screen), fail)
   const context: FlowContext = {
     adapters: adapters.filter((_, index) => detected[index]),
     roots,
     scope,
-    review: (change) => planChange(adapters, change, roots).then((plan) => setScreen({ name: "review", plan }), fail),
+    review: (...changes) =>
+      Promise.all(changes.map((change) => planChange(adapters, change, roots))).then((plans) => {
+        setScreen({ name: "review", plan: mergePlans(plans), secrets: changes.flatMap((change) => literalSecrets(change.server)) })
+      }, fail),
     open: setScreen,
   }
   const onApplied = (text: string) => {
@@ -124,11 +129,16 @@ interface ActionTarget {
   kind: Kind
   item: Item | undefined
   context: FlowContext
-  start: (next: Screen | Promise<Screen>) => void
+  start: (next: Screen | Promise<Screen | void>) => void
 }
 
-// Memory and skill keys on the list; returns false when the key is not an action.
+// List keys of each kind; returns false when the key is not an action.
 function runAction(name: string, { kind, item, context, start }: ActionTarget): boolean {
+  if (kind === "mcp") {
+    const next = runMcpAction(name, item, context)
+    if (next) start(next)
+    return Boolean(next)
+  }
   if (kind !== "memory" && kind !== "skill") return false
   if (name === "a") start(kind === "memory" ? addMemory(context) : newSkill(context))
   else if (!item) return false
@@ -153,7 +163,12 @@ function ActiveScreen({ screen, context, backupRoot, onApplied }: ActiveScreenPr
     const save = (text: string) => context.review(screen.toChange(text))
     return <TextEditor title={screen.title} initialText={screen.initialText} onSave={save} onCancel={back} />
   }
-  return <ReviewChanges plan={screen.plan} backupRoot={backupRoot} home={context.roots.home} onApplied={onApplied} onBack={back} />
+  if (screen.name === "mcpForm") {
+    const submit = (server: McpServer, targets: McpTarget[]) => context.review(...screen.toChanges(server, targets))
+    const { title, server, targets, fixed } = screen
+    return <McpForm title={title} server={server} targets={targets} adapters={context.adapters} fixed={fixed} onSubmit={submit} onCancel={back} />
+  }
+  return <ReviewChanges plan={screen.plan} secrets={screen.secrets} backupRoot={backupRoot} home={context.roots.home} onApplied={onApplied} onBack={back} />
 }
 
 const START_VIEW: ViewState = { kind: "memory", scope: "global", focus: "list", harnessIndex: 0, listIndex: 0 }
