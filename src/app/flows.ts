@@ -51,20 +51,28 @@ function memoryChoices(adapter: HarnessAdapter, scope: FlowContext["scope"]) {
   )
 }
 
+// Claude Code auto memory entries carry name, description and metadata.type frontmatter.
+const MEMORY_TYPES = ["user", "feedback", "project", "reference"]
+const isAutoEntry = (file: string) => file.endsWith(":memory/<name>.md")
+
 export function addMemory(context: FlowContext): Screen {
   const adapters = context.adapters.filter((adapter) => memoryChoices(adapter, context.scope).length > 0)
   const adapterOf = (id: string) => adapters.find((adapter) => adapter.id === id)!
-  const nextStep = ([harness, file, name]: string[]): PromptStep | null => {
+  const nextStep = ([harness, file, name, type, description]: string[]): PromptStep | null => {
     if (!harness) return { label: "Harness", options: adapters.map((adapter) => ({ name: adapter.label, description: "", value: adapter.id })) }
     if (!file) return { label: "File", options: memoryChoices(adapterOf(harness), context.scope) }
-    return file.includes("<name>") && !name ? { label: "Name" } : null
+    if (file.includes("<name>") && !name) return { label: "Name" }
+    if (!isAutoEntry(file)) return null
+    if (!type) return { label: "Type", options: MEMORY_TYPES.map((value) => ({ name: value, description: "", value })) }
+    return description === undefined ? { label: "Description" } : null
   }
-  const onDone = ([harness, file, name]: string[]) => {
+  const onDone = ([harness, file, name, type, description]: string[]) => {
     const separator = file!.indexOf(":")
     const scope = file!.slice(0, separator) as Scope
     const fileName = file!.slice(separator + 1).replace("<name>", name ?? "")
+    const initialText = isAutoEntry(file!) ? `---\n${stringify({ name, description, metadata: { type } })}---\n\n` : ""
     const toChange = (text: string): Change => ({ kind: "memory", op: "create", target: { harness: adapterOf(harness!).id, scope }, name: fileName, text })
-    context.open({ name: "editor", title: fileName, initialText: "", toChange })
+    context.open({ name: "editor", title: fileName, initialText, toChange })
   }
   return { name: "prompt", title: "Add memory", nextStep, onDone }
 }

@@ -74,7 +74,7 @@ function fakeAdapter(id: HarnessId, label: string, { memoryFiles, skillRoot, fai
 
 function renderApp(fail?: string) {
   const adapters = [
-    fakeAdapter("claude-code", "Claude Code", { memoryFiles: ["CLAUDE.md"], skillRoot: ".claude/skills", fail }),
+    fakeAdapter("claude-code", "Claude Code", { memoryFiles: ["CLAUDE.md", "memory/<name>.md"], skillRoot: ".claude/skills", fail }),
     fakeAdapter("codex", "Codex", { memoryFiles: ["AGENTS.md", "rules/<name>.md"], skillRoot: ".agents/skills" }),
   ]
   const backupRoot = join(home, "backups")
@@ -167,6 +167,35 @@ test("add memory plans a create of the chosen file with the filled-in name", asy
     const review = await waitForText(setup, "new file")
     expect(review).toContain("Prefer tabs.")
     expect(changes).toEqual([{ kind: "memory", op: "create", target: { harness: "codex", scope: "global" }, name: "rules/style.md", text: "Prefer tabs." }])
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("an auto memory entry asks for its type and description and starts with that frontmatter", async () => {
+  const setup = await renderApp()
+  try {
+    await waitForText(setup, "Be brief.")
+    setup.mockInput.pressKey("a")
+    await waitForText(setup, "Harness")
+    setup.mockInput.pressEnter() // Claude Code
+    await waitForText(setup, "memory/<name>.md")
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressEnter()
+    await waitForText(setup, "Name")
+    await setup.mockInput.typeText("no-checkins")
+    setup.mockInput.pressEnter()
+    await waitForText(setup, "reference")
+    setup.mockInput.pressArrow("down") // feedback
+    setup.mockInput.pressEnter()
+    await waitForText(setup, "Description")
+    await setup.mockInput.typeText("Finish the task")
+    setup.mockInput.pressEnter()
+    await waitForText(setup, "ctrl+s")
+    setup.mockInput.pressKey("s", { ctrl: true })
+    await waitForText(setup, "new file")
+    expect(changes[0]).toMatchObject({ name: "memory/no-checkins.md" })
+    expect(changes[0]!.text).toBe("---\nname: no-checkins\ndescription: Finish the task\nmetadata:\n  type: feedback\n---\n\n")
   } finally {
     setup.renderer.destroy()
   }
