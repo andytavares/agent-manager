@@ -33,6 +33,7 @@ const TRANSPORTS: Record<string, McpServer["transport"]> = {
   ws: "http",
 }
 const PLUGIN_SCOPES: Record<string, Scope> = { user: "global", project: "project", local: "local" }
+const CLI_SCOPES: Record<Scope, string> = { global: "user", project: "project", local: "local" }
 
 function configPaths(roots: Roots) {
   const override = roots.env.CLAUDE_CONFIG_DIR
@@ -309,8 +310,43 @@ async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
   return plan
 }
 
+const PLUGIN_NOTICE = "Restart Claude Code sessions or run /reload-plugins to load this change."
+
+function pluginCommandArgs(change: Change): string[] {
+  const { op, item, plugin, marketplace, target } = change
+  if (!plugin && !item) return ["marketplace", op === "create" ? "add" : "remove", marketplace!, "--scope", CLI_SCOPES[target.scope]]
+  if (op === "create") return ["install", plugin!.name, "-s", CLI_SCOPES[target.scope]]
+  const scope = CLI_SCOPES[item!.scope]
+  if (op === "delete") return ["uninstall", item!.name, "-s", scope]
+  const wasEnabled = !item!.offIn?.includes(ID)
+  if (plugin!.enabled !== wasEnabled) return [plugin!.enabled ? "enable" : "disable", item!.name, "-s", scope]
+  return ["update", item!.name, "-s", scope]
+}
+
+// Plugins change only through the claude CLI; the scope's settings file holds enabledPlugins.
+function planPlugin(change: Change, roots: Roots): WritePlan {
+  const { op, item } = change
+  if (op === "move" || op === "copy") throw new Error(`${LABEL}: plugins cannot ${op}`)
+  if (item?.readOnly) throw new Error(`${LABEL}: ${item.name} is read-only (${item.readOnly})`)
+  const { configDir } = configPaths(roots)
+  const scope = item?.scope ?? change.target.scope
+  const settings = settingsFiles(roots, configDir)[["global", "project", "local"].indexOf(scope)]!
+  const touches = [installedPluginsPath(roots), join(configDir, "plugins/known_marketplaces.json"), settings]
+  const command = { argv: ["claude", "plugin", ...pluginCommandArgs(change)], touches, cwd: roots.project }
+  return { ...emptyPlan(), commands: [command], notices: [PLUGIN_NOTICE] }
+}
+
+async function marketplaces(roots: Roots): Promise<{ name: string; source: string }[]> {
+  const known = (await readJson(join(configPaths(roots).configDir, "plugins/known_marketplaces.json"))) ?? {}
+  return Object.entries(known).map(([name, entry]) => {
+    const source = entry?.source ?? {}
+    return { name, source: String(source.repo ?? source.url ?? source.path ?? source.package ?? "") }
+  })
+}
+
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
   if (change.kind === "mcp") return planMcp(change, roots)
+  if (change.kind === "plugin") return planPlugin(change, roots)
   if (change.kind !== "memory") throw new Error(`${LABEL}: ${change.kind} changes are not supported yet`)
   const { configDir } = configPaths(roots)
   const autoDir = autoMemoryDir(roots, configDir, (await readJson(join(configDir, "settings.json"))) ?? {})
@@ -335,6 +371,7 @@ export const claudeCode: HarnessAdapter = {
   scopes: ["global", "project", "local"],
   memoryFiles: MEMORY_FILES,
   plan,
+  marketplaces,
   async skillRoots(roots) {
     return [
       { path: join(configPaths(roots).configDir, "skills"), scope: "global" },

@@ -259,10 +259,89 @@ test("deleting an auto memory entry removes its MEMORY.md lines; deleting MEMORY
   })
 })
 
-test("plan throws for plugin changes", async () => {
-  await expect(claudeCode.plan({ ...memoryChange({ op: "create" }), kind: "plugin" }, roots())).rejects.toThrow(
-    "Claude Code: plugin changes are not supported yet",
+const PLUGIN_NOTICE = "Restart Claude Code sessions or run /reload-plugins to load this change."
+const pluginChange = (scope: Scope, fields: Partial<Change> & Pick<Change, "op">): Change => ({
+  kind: "plugin",
+  target: { harness: "claude-code", scope },
+  ...fields,
+})
+const pluginTouches = (settings: string) => [
+  join(home, ".claude/plugins/installed_plugins.json"),
+  join(home, ".claude/plugins/known_marketplaces.json"),
+  settings,
+]
+const commandOnly = (argv: string[], settings: string): WritePlan => ({
+  ...editsOnly([]),
+  commands: [{ argv, touches: pluginTouches(settings), cwd: project }],
+  notices: [PLUGIN_NOTICE],
+})
+const USER_SETTINGS = () => join(home, ".claude/settings.json")
+const PROJECT_SETTINGS = () => join(project, ".claude/settings.json")
+const LOCAL_SETTINGS = () => join(project, ".claude/settings.local.json")
+
+test("plugin create installs at the target scope", async () => {
+  const plugin = { name: "zeta@mkt", enabled: true }
+  expect(await claudeCode.plan(pluginChange("global", { op: "create", plugin }), roots())).toEqual(
+    commandOnly(["claude", "plugin", "install", "zeta@mkt", "-s", "user"], USER_SETTINGS()),
   )
+  expect(await claudeCode.plan(pluginChange("project", { op: "create", plugin }), roots())).toEqual(
+    commandOnly(["claude", "plugin", "install", "zeta@mkt", "-s", "project"], PROJECT_SETTINGS()),
+  )
+  expect(await claudeCode.plan(pluginChange("local", { op: "create", plugin }), roots())).toEqual(
+    commandOnly(["claude", "plugin", "install", "zeta@mkt", "-s", "local"], LOCAL_SETTINGS()),
+  )
+})
+
+test("plugin delete uninstalls at the item's scope", async () => {
+  const gamma = byName(await list("plugin"), "gamma@mkt")
+  expect(await claudeCode.plan(pluginChange("global", { op: "delete", item: gamma }), roots())).toEqual(
+    commandOnly(["claude", "plugin", "uninstall", "gamma@mkt", "-s", "project"], PROJECT_SETTINGS()),
+  )
+})
+
+test("plugin update enables, disables or updates from the item's state", async () => {
+  const plugins = await list("plugin")
+  const alpha = byName(plugins, "alpha@mkt") // on, user
+  const delta = byName(plugins, "delta@mkt") // off, local
+  const off = await claudeCode.plan(pluginChange("global", { op: "update", item: alpha, plugin: { name: "alpha@mkt", enabled: false } }), roots())
+  expect(off).toEqual(commandOnly(["claude", "plugin", "disable", "alpha@mkt", "-s", "user"], USER_SETTINGS()))
+  const on = await claudeCode.plan(pluginChange("local", { op: "update", item: delta, plugin: { name: "delta@mkt", enabled: true } }), roots())
+  expect(on).toEqual(commandOnly(["claude", "plugin", "enable", "delta@mkt", "-s", "local"], LOCAL_SETTINGS()))
+  const same = await claudeCode.plan(pluginChange("global", { op: "update", item: alpha, plugin: { name: "alpha@mkt", enabled: true } }), roots())
+  expect(same).toEqual(commandOnly(["claude", "plugin", "update", "alpha@mkt", "-s", "user"], USER_SETTINGS()))
+})
+
+test("marketplace create adds and delete removes at the target scope", async () => {
+  const add = await claudeCode.plan(pluginChange("project", { op: "create", marketplace: "acme/plugins" }), roots())
+  expect(add).toEqual(commandOnly(["claude", "plugin", "marketplace", "add", "acme/plugins", "--scope", "project"], PROJECT_SETTINGS()))
+  const remove = await claudeCode.plan(pluginChange("global", { op: "delete", marketplace: "acme" }), roots())
+  expect(remove).toEqual(commandOnly(["claude", "plugin", "marketplace", "remove", "acme", "--scope", "user"], USER_SETTINGS()))
+})
+
+test("plugin plan refuses read-only items and move or copy", async () => {
+  const locked: Item = { ...byName(await list("plugin"), "alpha@mkt"), readOnly: "managed by policy" }
+  await expect(claudeCode.plan(pluginChange("global", { op: "delete", item: locked }), roots())).rejects.toThrow("managed by policy")
+  const alpha = byName(await list("plugin"), "alpha@mkt")
+  await expect(claudeCode.plan(pluginChange("global", { op: "move", item: alpha }), roots())).rejects.toThrow("Claude Code: plugins cannot move")
+})
+
+test("marketplaces reads known_marketplaces.json", async () => {
+  const configDir = join(base, "marketplace-config")
+  mkdirSync(join(configDir, "plugins"), { recursive: true })
+  writeFileSync(
+    join(configDir, "plugins/known_marketplaces.json"),
+    JSON.stringify({
+      official: { source: { source: "github", repo: "acme/official" }, installLocation: "/x", lastUpdated: "2026-01-01T00:00:00.000Z" },
+      team: { source: { source: "git", url: "https://git.example.com/team.git" } },
+      mine: { source: { source: "directory", path: "/work/mine" } },
+    }),
+  )
+  expect(await claudeCode.marketplaces!(roots({ env: { CLAUDE_CONFIG_DIR: configDir } }))).toEqual([
+    { name: "official", source: "acme/official" },
+    { name: "team", source: "https://git.example.com/team.git" },
+    { name: "mine", source: "/work/mine" },
+  ])
+  expect(await claudeCode.marketplaces!(roots({ home: join(base, "absent") }))).toEqual([])
 })
 
 const RESTART = "Restart Claude Code sessions to load this change."
