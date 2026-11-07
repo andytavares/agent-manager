@@ -1,0 +1,107 @@
+import { expect, test } from "bun:test"
+import { testRender } from "@opentui/react/test-utils"
+import { App } from "../../src/app/App"
+import type { HarnessAdapter, HarnessId, Item, ItemDetail, Roots } from "../../src/core/model"
+
+const roots: Roots = { home: "/home/u", project: "/home/u/repo", env: {} }
+
+const items: Item[] = [
+  { kind: "memory", harness: "claude-code", scope: "global", name: "CLAUDE.md", path: "/home/u/.claude/CLAUDE.md", loadedBy: ["claude-code"] },
+  { kind: "mcp", harness: "claude-code", scope: "global", name: "linear", path: "/home/u/.claude.json", key: "mcpServers.linear", loadedBy: ["claude-code"], readOnly: "managed by policy" },
+  { kind: "mcp", harness: "codex", scope: "global", name: "playwright", path: "/home/u/.codex/config.toml", key: "mcp_servers.playwright", loadedBy: ["codex"] },
+  { kind: "mcp", harness: "claude-code", scope: "project", name: "postgres", path: "/home/u/repo/.mcp.json", key: "mcpServers.postgres", loadedBy: ["claude-code"] },
+]
+
+const details: Record<string, ItemDetail> = {
+  linear: {
+    type: "mcp",
+    server: { name: "linear", transport: "http", enabled: true, url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer sk-secret-1" }, native: {} },
+  },
+  playwright: { type: "mcp", server: { name: "playwright", transport: "stdio", enabled: true, command: "npx", native: {} } },
+  postgres: { type: "mcp", server: { name: "postgres", transport: "stdio", enabled: true, command: "pg", native: {} } },
+}
+
+function fakeAdapter(id: HarnessId, label: string): HarnessAdapter {
+  return {
+    id,
+    label,
+    scopes: ["global", "project"],
+    detect: async () => true,
+    list: async (kind) => items.filter((item) => item.kind === kind && item.harness === id),
+    read: async (item) => details[item.name] ?? { type: "text", text: `text of ${item.name}` },
+  }
+}
+
+const adapters = [fakeAdapter("claude-code", "Claude Code"), fakeAdapter("codex", "Codex")]
+
+async function renderApp(onQuit = () => {}) {
+  return testRender(<App adapters={adapters} roots={roots} onQuit={onQuit} />, { width: 110, height: 24 })
+}
+
+test("pressing 2 lists MCP servers of the global scope", async () => {
+  const setup = await renderApp()
+  try {
+    await setup.waitForFrame((frame) => frame.includes("CLAUDE.md"))
+    setup.mockInput.pressKey("2")
+    const frame = await setup.waitForFrame((f) => f.includes("playwright"))
+    expect(frame).toContain("linear")
+    expect(frame).toContain("stdio")
+    expect(frame).not.toContain("postgres")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("s switches to project scope and filters the list", async () => {
+  const setup = await renderApp()
+  try {
+    setup.mockInput.pressKey("2")
+    await setup.waitForFrame((f) => f.includes("playwright"))
+    setup.mockInput.pressKey("s")
+    const frame = await setup.waitForFrame((f) => f.includes("postgres"))
+    expect(frame).not.toContain("playwright")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("selecting a harness filters the list", async () => {
+  const setup = await renderApp()
+  try {
+    setup.mockInput.pressKey("2")
+    await setup.waitForFrame((f) => f.includes("playwright"))
+    setup.mockInput.pressTab() // focus moves from the list to the harness pane
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressArrow("down") // Codex
+    const frame = await setup.waitForFrame((f) => !f.includes("linear"))
+    expect(frame).toContain("playwright")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("detail masks header values and shows the read-only reason", async () => {
+  const setup = await renderApp()
+  try {
+    setup.mockInput.pressKey("2")
+    const frame = await setup.waitForFrame((f) => f.includes("Authorization"))
+    expect(frame).toContain("••••••••")
+    expect(frame).not.toContain("sk-secret-1")
+    expect(frame).toContain("managed by policy")
+    expect(frame).toContain("mcpServers.linear")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("q calls onQuit", async () => {
+  let quits = 0
+  const setup = await renderApp(() => quits++)
+  try {
+    setup.mockInput.pressKey("q")
+    await setup.waitFor(() => quits === 1)
+    expect(quits).toBe(1)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
