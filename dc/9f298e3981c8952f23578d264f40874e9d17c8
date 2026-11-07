@@ -1,0 +1,59 @@
+test/fixtures/codex/home/.codex/skills/old-skill/SKILL.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-4
+test/fixtures/codex/project/.codex/config.toml
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-6
+test/fixtures/codex/project/AGENTS.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+test/fixtures/codex/project/sub/AGENTS.override.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+test/fixtures/codex/project/sub/TEAM.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+test/fixtures/codex/home/.codex/memories/topics/tools.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+src/core/model.ts
+  s_b67d2564e0abf8::t_bf66c746df0004 31
+test/fixtures/codex/home/.codex/memories_v2/summary.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+test/fixtures/codex/home/.codex/AGENTS.override.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+test/fixtures/codex/project/sub/.agents/skills/local-skill/SKILL.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-4
+test/fixtures/codex/system-skills/plan/SKILL.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-4
+test/fixtures/codex/home/.codex/AGENTS.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1
+test/fixtures/codex/home/.codex/config.toml
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-36
+test/fixtures/codex/home/.agents/skills/research/SKILL.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-4
+src/adapters/codex.ts
+  s_b67d2564e0abf8::t_8daf2458442708 7,199-202,206
+  s_b67d2564e0abf8::t_ffc0e6f58fee79 1-6,8-49,52-98,102-134,136,138-143,148-184,186-198,203-205
+  s_b67d2564e0abf8::t_bf66c746df0004 50-51
+  s_b67d2564e0abf8::t_9f1c24f15f2173 99-101,135,137,144-147,185
+test/fixtures/codex/home/.agents/skills/pdf/SKILL.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-4
+test/adapters/codex.test.ts
+  s_b67d2564e0abf8::t_bf66c746df0004 108
+  s_b67d2564e0abf8::t_be21b48f80b4c0 1-33,39-50,52-57,59-107,109-127,129-172
+  s_b67d2564e0abf8::t_fc894b90e691c9 34-38,51,58
+  s_b67d2564e0abf8::t_b5dac51453fd1a 128
+test/fixtures/codex/project/.agents/skills/root-skill/SKILL.md
+  s_b67d2564e0abf8::t_ee1a5f134af8d9 1-4
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc9f298e3981c8952f23578d264f40874e9d17c8",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
