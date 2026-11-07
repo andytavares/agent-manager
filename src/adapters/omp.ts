@@ -322,6 +322,8 @@ function toEntry(server: McpServer): Record<string, unknown> {
 
 const hasEnvRef = (server: McpServer) => Object.values({ ...server.env, ...server.headers }).some((value) => value.includes("${"))
 
+const RESTART_NOTICE = "Restart omp to load this change."
+
 async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
   const item = change.item
   if (item?.readOnly) throw new Error(`omp: ${item.name} is read-only (${item.readOnly})`)
@@ -329,7 +331,7 @@ async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
   const before = await readText(path)
   let after = before ?? "{}\n"
   if (item) after = setJsonc(after, ["mcpServers", item.name], undefined)
-  const notices = ["Restart omp to load this change."]
+  const notices = [RESTART_NOTICE]
   if (change.op !== "delete") {
     const server = change.server!
     const taken = server.name in asRecord((await readJsonc(path)).mcpServers)
@@ -352,6 +354,50 @@ async function readPlugin(item: Item) {
   return { name: item.name, enabled, ...(typeof spec === "string" && { version: spec }), source: "npm" }
 }
 
+const pluginRoot = (roots: Roots, scope: Scope) => join(scope === "global" ? roots.home : roots.project, ".omp/plugins")
+const pluginFiles = (root: string) => ["installed_plugins.json", "package.json", "omp-plugins.lock.json"].map((file) => join(root, file))
+const scopeFlag = (scope: Scope) => ["--scope", scope === "global" ? "user" : "project"]
+
+// CLI commands from docs/marketplace.md "CLI equivalents":
+// https://github.com/can1357/oh-my-pi/blob/f4c5a138c119364668fba67b7f4437faf56b4324/docs/marketplace.md#L66-L76
+// npm/link plugins are user-scoped and ignore --scope (plugin-manager-installer-plumbing.md#L57), so only marketplace items pass it.
+function pluginArgv({ op, item, plugin, marketplace, target }: Change): string[] {
+  if (!plugin && !item && marketplace) return ["plugin", "marketplace", op === "create" ? "add" : "remove", marketplace]
+  if (op === "create") return ["plugin", "install", ...scopeFlag(target.scope), plugin!.name]
+  const flag = item!.key?.startsWith("plugins.") ? scopeFlag(item!.scope) : []
+  if (op === "delete") return ["plugin", "uninstall", ...flag, item!.name]
+  if (op !== "update") throw new Error(`omp: plugin ${op} is not available from the command line`)
+  const toggles = plugin!.enabled === Boolean(item!.offIn?.includes("omp"))
+  return ["plugin", toggles ? (plugin!.enabled ? "enable" : "disable") : "upgrade", ...flag, item!.name]
+}
+
+// plugin-overrides.json is read-only to the plugin manager (plugin-manager-installer-plumbing.md#L59), so enable cannot unmask it.
+async function refuseMasked(change: Change, roots: Roots): Promise<void> {
+  const { item, plugin } = change
+  if (change.op !== "update" || !item || !plugin?.enabled) return
+  const overrides = join(roots.project, ".omp/plugin-overrides.json")
+  if (strings((await readJsonc(overrides)).disabled).includes(item.name)) throw new Error(`omp: ${item.name} is disabled in ${overrides}; remove it from "disabled" there`)
+}
+
+async function planPlugin(change: Change, roots: Roots): Promise<WritePlan> {
+  const { item, plugin } = change
+  if (item?.readOnly) throw new Error(`omp: ${item.name} is read-only (${item.readOnly})`)
+  await refuseMasked(change, roots)
+  // npm plugins land in the user root whatever --scope says, so back up both roots.
+  const bothRoots = [...pluginFiles(pluginRoot(roots, "global")), ...pluginFiles(pluginRoot(roots, "project"))]
+  const touches = !plugin && !item ? [join(roots.home, ".omp/marketplaces.json")] : bothRoots
+  return { ...emptyPlan(), commands: [{ argv: ["omp", ...pluginArgv(change)], touches, cwd: roots.project }], notices: [RESTART_NOTICE] }
+}
+
+// Registry shape { version: 1, marketplaces: [{ name, sourceUri, ... }] }:
+// https://github.com/can1357/oh-my-pi/blob/f4c5a138c119364668fba67b7f4437faf56b4324/packages/coding-agent/src/extensibility/plugins/marketplace/types.ts#L141-L157
+// shortcut: reads the default-profile, non-XDG path only; add profile and XDG roots when a user needs them.
+async function marketplaces(roots: Roots): Promise<{ name: string; source: string }[]> {
+  const entries = (await readJsonc(join(roots.home, ".omp/marketplaces.json"))).marketplaces
+  return (Array.isArray(entries) ? entries : []).map(asRecord).filter((entry) => typeof entry.name === "string")
+    .map((entry) => ({ name: entry.name as string, source: String(entry.sourceUri ?? "") }))
+}
+
 export const omp: HarnessAdapter = {
   id: "omp",
   label: "omp",
@@ -364,6 +410,7 @@ export const omp: HarnessAdapter = {
 
   async plan(change, roots) {
     if (change.kind === "mcp") return planMcp(change, roots)
+    if (change.kind === "plugin") return planPlugin(change, roots)
     if (change.kind !== "memory") throw new Error(`omp: ${change.kind} changes are not supported yet`)
     return planMemory(change, roots)
   },
@@ -389,6 +436,8 @@ export const omp: HarnessAdapter = {
     const path = item.kind === "skill" ? join(item.path, "SKILL.md") : item.path
     return { type: "text", text: (await readText(path)) ?? "" }
   },
+
+  marketplaces,
 
   async importsMcpFrom(roots) {
     const ctx = await loadContext(roots)

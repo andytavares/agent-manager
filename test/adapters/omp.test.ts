@@ -370,8 +370,66 @@ test("plan mcp create makes a new mcp.json when absent and refuses a taken name"
   await expect(omp.plan(mcpChange({ target, server }), roots())).rejects.toThrow("db already exists")
 })
 
-test("plan mcp refuses read-only items; plugin changes are not supported yet", async () => {
+test("plan mcp refuses read-only items", async () => {
   const item = { ...(await mcpItem("fs")), readOnly: "imported from Codex" }
   await expect(omp.plan(mcpChange({ op: "delete", item }), roots())).rejects.toThrow("imported from Codex")
-  await expect(omp.plan(mcpChange({ kind: "plugin" }), roots())).rejects.toThrow("omp: plugin changes are not supported yet")
+})
+
+const pluginChange = (change: Partial<Change>): Change => ({ kind: "plugin", op: "create", target: { harness: "omp", scope: "global" }, ...change })
+const pluginItem = async (name: string) => (await list("plugin")).find((i) => i.name === name)!
+const pluginFiles = (root: string) => ["installed_plugins.json", "package.json", "omp-plugins.lock.json"].map((file) => join(root, ".omp/plugins", file))
+// omp writes npm plugins to the user root whatever --scope says, so every plugin command backs up both roots.
+const bothRoots = () => [...pluginFiles(home), ...pluginFiles(project)]
+const commandPlan = (argv: string[], touches: string[]) => ({ ...emptyPlan, commands: [{ argv, touches, cwd: project }], notices: [restart] })
+
+test("plan plugin install runs omp plugin install with the target scope", async () => {
+  const change = pluginChange({ target: { harness: "omp", scope: "project" }, plugin: { name: "docs@team", enabled: true } })
+  expect(await omp.plan(change, roots())).toEqual(commandPlan(["omp", "plugin", "install", "--scope", "project", "docs@team"], bothRoots()))
+})
+
+test("plan plugin uninstall, disable and upgrade pass --scope only for marketplace installs", async () => {
+  const marketplace = await pluginItem("code-review@claude-plugins-official")
+  const npm = await pluginItem("omp-lint")
+  expect(await omp.plan(pluginChange({ op: "delete", item: marketplace }), roots())).toEqual(
+    commandPlan(["omp", "plugin", "uninstall", "--scope", "user", marketplace.name], bothRoots()),
+  )
+  const disable = await omp.plan(pluginChange({ op: "update", item: npm, plugin: { name: "omp-lint", enabled: false } }), roots())
+  expect(disable).toEqual(commandPlan(["omp", "plugin", "disable", "omp-lint"], bothRoots()))
+  const upgrade = await omp.plan(pluginChange({ op: "update", item: marketplace, plugin: { name: marketplace.name, enabled: true, version: "2.0.0" } }), roots())
+  expect(upgrade.commands[0]!.argv).toEqual(["omp", "plugin", "upgrade", "--scope", "user", marketplace.name])
+})
+
+test("plan plugin enable runs omp plugin enable; a plugin masked by plugin-overrides.json is refused", async () => {
+  const lockOff = await pluginItem("omp-off")
+  const enable = await omp.plan(pluginChange({ op: "update", item: lockOff, plugin: { name: "omp-off", enabled: true } }), roots())
+  expect(enable.commands[0]!.argv).toEqual(["omp", "plugin", "enable", "omp-off"])
+  const masked = await pluginItem("omp-masked")
+  await expect(omp.plan(pluginChange({ op: "update", item: masked, plugin: { name: "omp-masked", enabled: true } }), roots())).rejects.toThrow(
+    `omp: omp-masked is disabled in ${join(project, ".omp/plugin-overrides.json")}`,
+  )
+})
+
+test("plan marketplace add and remove run omp plugin marketplace", async () => {
+  const touches = [join(home, ".omp/marketplaces.json")]
+  expect(await omp.plan(pluginChange({ marketplace: "anthropics/claude-plugins-official" }), roots())).toEqual(
+    commandPlan(["omp", "plugin", "marketplace", "add", "anthropics/claude-plugins-official"], touches),
+  )
+  expect((await omp.plan(pluginChange({ op: "delete", marketplace: "team" }), roots())).commands[0]!.argv).toEqual(["omp", "plugin", "marketplace", "remove", "team"])
+})
+
+test("plan plugin refuses read-only items", async () => {
+  const item = { ...(await pluginItem("omp-lint")), readOnly: "imported from Claude Code" }
+  await expect(omp.plan(pluginChange({ op: "delete", item }), roots())).rejects.toThrow("omp: omp-lint is read-only (imported from Claude Code)")
+})
+
+test("marketplaces come from ~/.omp/marketplaces.json", async () => {
+  expect(await omp.marketplaces!(roots())).toEqual([])
+  const registry = join(home, ".omp/marketplaces.json")
+  const entry = { sourceType: "github", catalogPath: "/c", addedAt: "", updatedAt: "" }
+  writeFileSync(registry, JSON.stringify({ version: 1, marketplaces: [{ ...entry, name: "team", sourceUri: "acme/plugins" }] }))
+  try {
+    expect(await omp.marketplaces!(roots())).toEqual([{ name: "team", source: "acme/plugins" }])
+  } finally {
+    rmSync(registry)
+  }
 })
