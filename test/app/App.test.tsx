@@ -41,6 +41,18 @@ async function renderApp(onQuit = () => {}) {
   return testRender(<App adapters={adapters} roots={roots} onQuit={onQuit} />, { width: 110, height: 24 })
 }
 
+// A lone escape is delivered after a short delay, so poll until the frame shows text.
+async function pressEscapeUntil(setup: Awaited<ReturnType<typeof renderApp>>, text: string): Promise<string> {
+  setup.mockInput.pressEscape()
+  let frame = ""
+  for (let tries = 0; tries < 40 && !frame.includes(text); tries++) {
+    await Bun.sleep(25)
+    await setup.renderOnce()
+    frame = setup.captureCharFrame()
+  }
+  return frame
+}
+
 test("pressing 2 lists MCP servers of the global scope", async () => {
   const setup = await renderApp()
   try {
@@ -61,7 +73,9 @@ test("s switches to project scope and filters the list", async () => {
     setup.mockInput.pressKey("2")
     await setup.waitForFrame((f) => f.includes("playwright"))
     setup.mockInput.pressKey("s")
-    const frame = await setup.waitForFrame((f) => f.includes("postgres"))
+    await setup.waitForFrame((f) => f.includes("Projects")) // the project picker; esc keeps the current project
+    const frame = await pressEscapeUntil(setup, "postgres")
+    expect(frame).toContain("postgres")
     expect(frame).not.toContain("playwright")
   } finally {
     setup.renderer.destroy()
@@ -136,13 +150,7 @@ test("/ filters the list by name; esc clears the filter", async () => {
     expect(filtered).toContain("filter: play")
     expect(filtered).toContain("playwright")
     expect(filtered).not.toContain("linear      http") // the list row, not the detail pane
-    setup.mockInput.pressEscape() // a lone escape is delivered after a short delay
-    let cleared = ""
-    for (let tries = 0; tries < 40 && !cleared.includes("linear      http"); tries++) {
-      await Bun.sleep(25)
-      await setup.renderOnce()
-      cleared = setup.captureCharFrame()
-    }
+    const cleared = await pressEscapeUntil(setup, "linear      http")
     expect(cleared).toContain("linear      http")
     expect(cleared).not.toContain("filter:")
   } finally {

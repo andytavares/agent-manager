@@ -516,3 +516,21 @@ test("one plugin installed at user and project scope gives two items, each readi
   const versions = await Promise.all(items.map(async (i) => ((await claudeCode.read(i)) as { plugin: { version?: string } }).plugin.version))
   expect(versions).toEqual(["1.0.0", "2.0.0"])
 })
+
+test("projects lists each project folder with its path from .claude.json or a transcript's cwd", async () => {
+  const configDir = join(base, "projects-config")
+  const folders = join(configDir, "projects")
+  const known = "/work/known.app" // "." and "/" both become "-", so the folder name alone cannot give the path
+  mkdirSync(join(folders, "-work-known-app"), { recursive: true })
+  mkdirSync(join(folders, "-work-from-transcript"))
+  writeFileSync(join(folders, "-work-from-transcript/s1.jsonl"), '{"type":"summary"}\n{"type":"user","cwd":"/work/from.transcript"}\n')
+  mkdirSync(join(folders, "-work-unknown/memory"), { recursive: true })
+  writeFileSync(join(folders, "stray.txt"), "")
+  writeFileSync(join(configDir, ".claude.json"), JSON.stringify({ projects: { [known]: {} } }))
+  expect(await claudeCode.projects!(roots({ env: { CLAUDE_CONFIG_DIR: configDir } }))).toEqual([
+    { path: "/work/from.transcript", dataDir: join(folders, "-work-from-transcript") },
+    { path: known, dataDir: join(folders, "-work-known-app") },
+    { dataDir: join(folders, "-work-unknown") },
+  ])
+  expect(await claudeCode.projects!(roots({ home: join(base, "absent") }))).toEqual([])
+})

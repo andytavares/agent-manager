@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { readdir, readFile } from "node:fs/promises"
+import { open, readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import { parse, type ParseError } from "jsonc-parser"
@@ -11,6 +11,7 @@ import {
   type Item,
   type Kind,
   type McpServer,
+  type ProjectData,
   type Roots,
   type Scope,
   type WritePlan,
@@ -67,11 +68,13 @@ function existingFiles(root: string, names: string[], fields: Partial<Item> & { 
     .map((name) => item("memory", fields.scope, name, join(root, name), fields))
 }
 
+const projectFolderName = (path: string) => path.replace(/[/.]/g, "-")
+
 function autoMemoryDir(roots: Roots, configDir: string, settings: Json): string {
   const custom = settings.autoMemoryDirectory
   return typeof custom === "string"
     ? custom.replace(/^~(?=\/|$)/, roots.home)
-    : join(configDir, "projects", roots.project.replace(/[/.]/g, "-"), "memory")
+    : join(configDir, "projects", projectFolderName(roots.project), "memory")
 }
 
 async function autoMemory(roots: Roots, configDir: string, settings: Json): Promise<Item[]> {
@@ -349,6 +352,36 @@ async function marketplaces(roots: Roots): Promise<{ name: string; source: strin
   })
 }
 
+// The first cwd in the first 16 KB of a transcript; a transcript can be many megabytes.
+async function transcriptCwd(dataDir: string): Promise<string | undefined> {
+  const transcript = (await readdir(dataDir)).find((name) => name.endsWith(".jsonl"))
+  if (!transcript) return undefined
+  const file = await open(join(dataDir, transcript))
+  try {
+    const { buffer, bytesRead } = await file.read(Buffer.alloc(16384), 0, 16384, 0)
+    const cwd = /"cwd":("(?:[^"\\]|\\.)*")/.exec(buffer.toString("utf8", 0, bytesRead))?.[1]
+    return cwd && JSON.parse(cwd)
+  } finally {
+    await file.close()
+  }
+}
+
+// A folder name loses the difference between "/" and ".", so the path comes from .claude.json or a transcript.
+async function projects(roots: Roots): Promise<ProjectData[]> {
+  const { configDir, claudeJson } = configPaths(roots)
+  const dir = join(configDir, "projects")
+  if (!existsSync(dir)) return []
+  const known = Object.keys((await readJson(claudeJson))?.projects ?? {})
+  const pathByFolder = new Map(known.map((path) => [projectFolderName(path), path]))
+  const folders = (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  return Promise.all(
+    folders.sort().map(async (folder) => {
+      const path = pathByFolder.get(folder) ?? (await transcriptCwd(join(dir, folder)))
+      return { ...(path && { path }), dataDir: join(dir, folder) }
+    }),
+  )
+}
+
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
   if (change.kind === "mcp") return planMcp(change, roots)
   if (change.kind === "plugin") return planPlugin(change, roots)
@@ -377,6 +410,7 @@ export const claudeCode: HarnessAdapter = {
   memoryFiles: MEMORY_FILES,
   plan,
   marketplaces,
+  projects,
   async skillRoots(roots) {
     return [
       { path: join(configPaths(roots).configDir, "skills"), scope: "global" },

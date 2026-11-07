@@ -1,6 +1,7 @@
 import { dirname } from "node:path"
 import { stringify } from "yaml"
-import { HARNESS_LABELS, type Change, type HarnessAdapter, type HarnessId, type Item, type McpServer, type PluginInfo, type Roots, type Scope, type WritePlan } from "../core/model"
+import { HARNESS_LABELS, type Change, type HarnessAdapter, type HarnessId, type Item, type McpServer, type PluginInfo, type ProjectData, type Roots, type Scope, type WritePlan } from "../core/model"
+import { emptyPlan } from "../core/memory-plan"
 import { skillRootChoices } from "../core/registry"
 import { tildePath } from "./ItemList"
 import type { McpTarget } from "./McpForm"
@@ -13,6 +14,7 @@ export type Screen =
   | { name: "mcpForm"; title: string; server: McpServer; targets: McpTarget[]; fixed?: boolean; toChanges: (server: McpServer, targets: McpTarget[]) => Change[] }
   | { name: "review"; plan: WritePlan; secrets: string[] } // secrets: literal values masked until revealed
   | { name: "marketplaces"; marketplaces: Marketplace[] }
+  | { name: "projects"; projects: ProjectData[] }
 
 export interface Marketplace {
   harness: HarnessId
@@ -249,4 +251,14 @@ export function runPluginAction(name: string, item: Item | undefined, context: F
   if (name === "m") return marketplaceList(context)
   const action = PLUGIN_ITEM_ACTIONS[name]
   return item && action ? action(item, context) : undefined
+}
+
+export async function projectList(context: FlowContext): Promise<Screen> {
+  const lists = await Promise.all(context.adapters.map((adapter) => adapter.projects?.(context.roots) ?? []))
+  return { name: "projects", projects: lists.flat() }
+}
+
+// Only the harness's data folder goes; the project folder stays. apply moves it into the backup.
+export function deleteProject(project: ProjectData, context: FlowContext): void {
+  context.open({ name: "review", plan: { ...emptyPlan(), removals: [project.dataDir] }, secrets: [] })
 }
