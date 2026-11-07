@@ -52,6 +52,12 @@ export interface PluginInfo {
   source?: string // marketplace, npm, or local path
 }
 
+// A project's data that a harness keeps outside the project folder, e.g. transcripts and auto memory.
+export interface ProjectData {
+  path?: string // the project folder; absent when it cannot be found
+  dataDir: string
+}
+
 export type ItemDetail =
   | { type: "text"; text: string }
   | { type: "mcp"; server: McpServer }
@@ -73,6 +79,8 @@ export interface HarnessAdapter {
   skillRoots(roots: Roots): Promise<{ path: string; scope: Scope }[]>
   // Marketplaces this harness knows, for the plugin install screen; absent when it has none.
   marketplaces?(roots: Roots): Promise<{ name: string; source: string }[]>
+  // Every project this harness keeps data for, for the project picker; absent when it keeps none.
+  projects?(roots: Roots): Promise<ProjectData[]>
   // MCP sources of other harnesses this harness imports (omp); the registry adds it to their loadedBy.
   importsMcpFrom?(roots: Roots): Promise<{ harness: HarnessId; scope: Scope }[]>
 }

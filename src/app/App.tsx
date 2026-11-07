@@ -1,13 +1,15 @@
 import { useKeyboard } from "@opentui/react"
-import { useEffect, useReducer, useRef, useState } from "react"
+import { useEffect, useMemo, useReducer, useRef, useState } from "react"
+import { basename } from "node:path"
 import { defaultBackupRoot } from "../core/apply"
-import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots } from "../core/model"
+import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, ProjectData, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
-import { addMarketplace, addMemory, deleteItem, editItem, type FlowContext, type Marketplace, newSkill, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
+import { addMarketplace, addMemory, deleteItem, deleteProject, editItem, type FlowContext, type Marketplace, newSkill, projectList, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
 import { ACCENT, DIM, ItemList, SELECTED_BG, tildePath } from "./ItemList"
 import { Marketplaces } from "./Marketplaces"
 import { McpForm, type McpTarget } from "./McpForm"
+import { Projects } from "./Projects"
 import { Prompt } from "./Prompt"
 import { ReviewChanges } from "./ReviewChanges"
 import { TextEditor } from "./TextEditor"
@@ -31,6 +33,7 @@ const STATUS: Record<string, string> = {
   mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel",
   review: "enter apply  esc back",
   marketplaces: "a add  d remove  esc back",
+  projects: "enter open  d delete its Claude Code data  esc keep current project",
 }
 
 interface AppProps {
@@ -40,7 +43,9 @@ interface AppProps {
   onQuit: () => void
 }
 
-export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), onQuit }: AppProps) {
+export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoot(startRoots), onQuit }: AppProps) {
+  const [project, setProject] = useState(startRoots.project)
+  const roots = useMemo(() => ({ ...startRoots, project }), [startRoots, project])
   const [view, dispatch] = useReducer(pressKey, START_VIEW)
   const [screen, setScreen] = useState<Screen>(LIST)
   const [message, setMessage] = useState(NO_MESSAGE)
@@ -76,6 +81,11 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
       }, fail),
     open: setScreen,
   }
+  const openProject = (picked: ProjectData) => {
+    if (!picked.path) return fail(new Error(`Cannot open ${basename(picked.dataDir)}: its project folder is unknown.`))
+    setProject(picked.path)
+    setScreen(LIST)
+  }
   const onApplied = (text: string) => {
     setMessage({ text, error: false })
     setScreen(LIST)
@@ -91,8 +101,10 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
     else if (typed === "?") setShowHelp(true)
     else if (key.name === "escape") setFilter(NO_FILTER)
     else if (key.name === "q") onQuit()
-    else if (!runAction(key.name, { kind, item: selectedItem, context, start }))
+    else if (!runAction(key.name, { kind, item: selectedItem, context, start })) {
       dispatch({ name: key.name, harnessCount: adapters.length, listLength: visible.length })
+      if (key.name === "s" && scope === "global") start(projectList(context))
+    }
   })
 
   return (
@@ -103,7 +115,7 @@ export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), on
         <Help />
       ) : screen.name !== "list" ? (
         <box border flexGrow={1} flexShrink={1} overflow="hidden">
-          <ActiveScreen screen={screen} context={context} backupRoot={backupRoot} onApplied={onApplied} />
+          <ActiveScreen screen={screen} context={context} backupRoot={backupRoot} onApplied={onApplied} onOpenProject={openProject} />
         </box>
       ) : (
         <box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
@@ -174,9 +186,10 @@ interface ActiveScreenProps {
   context: FlowContext
   backupRoot: string
   onApplied: (message: string) => void
+  onOpenProject: (project: ProjectData) => void
 }
 
-function ActiveScreen({ screen, context, backupRoot, onApplied }: ActiveScreenProps) {
+function ActiveScreen({ screen, context, backupRoot, onApplied, onOpenProject }: ActiveScreenProps) {
   const back = () => context.open(LIST)
   if (screen.name === "prompt") return <Prompt title={screen.title} nextStep={screen.nextStep} onDone={screen.onDone} onCancel={back} />
   if (screen.name === "editor") {
@@ -192,6 +205,11 @@ function ActiveScreen({ screen, context, backupRoot, onApplied }: ActiveScreenPr
     const add = () => context.open(addMarketplace(context))
     const remove = (marketplace: Marketplace) => removeMarketplace(marketplace, context)
     return <Marketplaces marketplaces={screen.marketplaces} onAdd={add} onRemove={remove} onBack={back} />
+  }
+  if (screen.name === "projects") {
+    const remove = (project: ProjectData) => deleteProject(project, context)
+    const { roots } = context
+    return <Projects projects={screen.projects} current={roots.project} home={roots.home} onOpen={onOpenProject} onDelete={remove} onBack={back} />
   }
   return <ReviewChanges plan={screen.plan} secrets={screen.secrets} backupRoot={backupRoot} home={context.roots.home} onApplied={onApplied} onBack={back} />
 }

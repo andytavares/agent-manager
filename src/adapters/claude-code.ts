@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { readdir, readFile } from "node:fs/promises"
+import { open, readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 import { parse, type ParseError } from "jsonc-parser"
@@ -11,6 +11,7 @@ import {
   type Item,
   type Kind,
   type McpServer,
+  type ProjectData,
   type Roots,
   type Scope,
   type WritePlan,
@@ -67,11 +68,13 @@ function existingFiles(root: string, names: string[], fields: Partial<Item> & { 
     .map((name) => item("memory", fields.scope, name, join(root, name), fields))
 }
 
+const projectFolderName = (path: string) => path.replace(/[/.]/g, "-")
+
 function autoMemoryDir(roots: Roots, configDir: string, settings: Json): string {
   const custom = settings.autoMemoryDirectory
   return typeof custom === "string"
     ? custom.replace(/^~(?=\/|$)/, roots.home)
-    : join(configDir, "projects", roots.project.replace(/[/.]/g, "-"), "memory")
+    : join(configDir, "projects", projectFolderName(roots.project), "memory")
 }
 
 async function autoMemory(roots: Roots, configDir: string, settings: Json): Promise<Item[]> {
@@ -316,7 +319,8 @@ const PLUGIN_NOTICE = "Restart Claude Code sessions or run /reload-plugins to lo
 
 function pluginCommandArgs(change: Change): string[] {
   const { op, item, plugin, marketplace, target } = change
-  if (!plugin && !item) return ["marketplace", op === "create" ? "add" : "remove", marketplace!, "--scope", CLI_SCOPES[target.scope]]
+  // Remove without --scope: it fails for a marketplace that the target scope does not declare.
+  if (!plugin && !item) return op === "create" ? ["marketplace", "add", marketplace!, "--scope", CLI_SCOPES[target.scope]] : ["marketplace", "remove", marketplace!]
   if (op === "create") return ["install", plugin!.name, "-s", CLI_SCOPES[target.scope]]
   const scope = CLI_SCOPES[item!.scope]
   if (op === "delete") return ["uninstall", item!.name, "-s", scope]
@@ -332,8 +336,10 @@ function planPlugin(change: Change, roots: Roots): WritePlan {
   if (item?.readOnly) throw new Error(`${LABEL}: ${item.name} is read-only (${item.readOnly})`)
   const { configDir } = configPaths(roots)
   const scope = item?.scope ?? change.target.scope
-  const settings = settingsFiles(roots, configDir)[["global", "project", "local"].indexOf(scope)]!
-  const touches = [installedPluginsPath(roots), join(configDir, "plugins/known_marketplaces.json"), settings]
+  const allSettings = settingsFiles(roots, configDir)
+  const settings = allSettings[["global", "project", "local"].indexOf(scope)]!
+  const removesMarketplace = op === "delete" && !item
+  const touches = [installedPluginsPath(roots), join(configDir, "plugins/known_marketplaces.json"), ...(removesMarketplace ? allSettings : [settings])]
   const command = { argv: ["claude", "plugin", ...pluginCommandArgs(change)], touches, cwd: roots.project }
   return { ...emptyPlan(), commands: [command], notices: [PLUGIN_NOTICE] }
 }
@@ -344,6 +350,36 @@ async function marketplaces(roots: Roots): Promise<{ name: string; source: strin
     const source = entry?.source ?? {}
     return { name, source: String(source.repo ?? source.url ?? source.path ?? source.package ?? "") }
   })
+}
+
+// The first cwd in the first 16 KB of a transcript; a transcript can be many megabytes.
+async function transcriptCwd(dataDir: string): Promise<string | undefined> {
+  const transcript = (await readdir(dataDir)).find((name) => name.endsWith(".jsonl"))
+  if (!transcript) return undefined
+  const file = await open(join(dataDir, transcript))
+  try {
+    const { buffer, bytesRead } = await file.read(Buffer.alloc(16384), 0, 16384, 0)
+    const cwd = /"cwd":("(?:[^"\\]|\\.)*")/.exec(buffer.toString("utf8", 0, bytesRead))?.[1]
+    return cwd && JSON.parse(cwd)
+  } finally {
+    await file.close()
+  }
+}
+
+// A folder name loses the difference between "/" and ".", so the path comes from .claude.json or a transcript.
+async function projects(roots: Roots): Promise<ProjectData[]> {
+  const { configDir, claudeJson } = configPaths(roots)
+  const dir = join(configDir, "projects")
+  if (!existsSync(dir)) return []
+  const known = Object.keys((await readJson(claudeJson))?.projects ?? {})
+  const pathByFolder = new Map(known.map((path) => [projectFolderName(path), path]))
+  const folders = (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name)
+  return Promise.all(
+    folders.sort().map(async (folder) => {
+      const path = pathByFolder.get(folder) ?? (await transcriptCwd(join(dir, folder)))
+      return { ...(path && { path }), dataDir: join(dir, folder) }
+    }),
+  )
 }
 
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
@@ -374,6 +410,7 @@ export const claudeCode: HarnessAdapter = {
   memoryFiles: MEMORY_FILES,
   plan,
   marketplaces,
+  projects,
   async skillRoots(roots) {
     return [
       { path: join(configPaths(roots).configDir, "skills"), scope: "global" },

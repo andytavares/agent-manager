@@ -311,11 +311,16 @@ test("plugin update enables, disables or updates from the item's state", async (
   expect(same).toEqual(commandOnly(["claude", "plugin", "update", "alpha@mkt", "-s", "user"], USER_SETTINGS()))
 })
 
-test("marketplace create adds and delete removes at the target scope", async () => {
+test("marketplace create adds at the target scope", async () => {
   const add = await claudeCode.plan(pluginChange("project", { op: "create", marketplace: "acme/plugins" }), roots())
   expect(add).toEqual(commandOnly(["claude", "plugin", "marketplace", "add", "acme/plugins", "--scope", "project"], PROJECT_SETTINGS()))
+})
+
+// A marketplace such as claude-plugins-official is declared in no settings file, so --scope user fails.
+test("marketplace delete removes from every scope and backs up every settings file", async () => {
   const remove = await claudeCode.plan(pluginChange("global", { op: "delete", marketplace: "acme" }), roots())
-  expect(remove).toEqual(commandOnly(["claude", "plugin", "marketplace", "remove", "acme", "--scope", "user"], USER_SETTINGS()))
+  const touches = [...pluginTouches(USER_SETTINGS()), PROJECT_SETTINGS(), LOCAL_SETTINGS()]
+  expect(remove.commands).toEqual([{ argv: ["claude", "plugin", "marketplace", "remove", "acme"], touches, cwd: project }])
 })
 
 test("plugin plan refuses read-only items and move or copy", async () => {
@@ -510,4 +515,22 @@ test("one plugin installed at user and project scope gives two items, each readi
   ])
   const versions = await Promise.all(items.map(async (i) => ((await claudeCode.read(i)) as { plugin: { version?: string } }).plugin.version))
   expect(versions).toEqual(["1.0.0", "2.0.0"])
+})
+
+test("projects lists each project folder with its path from .claude.json or a transcript's cwd", async () => {
+  const configDir = join(base, "projects-config")
+  const folders = join(configDir, "projects")
+  const known = "/work/known.app" // "." and "/" both become "-", so the folder name alone cannot give the path
+  mkdirSync(join(folders, "-work-known-app"), { recursive: true })
+  mkdirSync(join(folders, "-work-from-transcript"))
+  writeFileSync(join(folders, "-work-from-transcript/s1.jsonl"), '{"type":"summary"}\n{"type":"user","cwd":"/work/from.transcript"}\n')
+  mkdirSync(join(folders, "-work-unknown/memory"), { recursive: true })
+  writeFileSync(join(folders, "stray.txt"), "")
+  writeFileSync(join(configDir, ".claude.json"), JSON.stringify({ projects: { [known]: {} } }))
+  expect(await claudeCode.projects!(roots({ env: { CLAUDE_CONFIG_DIR: configDir } }))).toEqual([
+    { path: "/work/from.transcript", dataDir: join(folders, "-work-from-transcript") },
+    { path: known, dataDir: join(folders, "-work-known-app") },
+    { dataDir: join(folders, "-work-unknown") },
+  ])
+  expect(await claudeCode.projects!(roots({ home: join(base, "absent") }))).toEqual([])
 })
