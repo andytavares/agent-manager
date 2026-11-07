@@ -28,6 +28,7 @@ export interface FlowContext {
   scope: "global" | "project"
   review: (...changes: Change[]) => void // plans each change and opens one review screen
   open: (screen: Screen) => void
+  back: () => void // to the last list screen: the item list, projects or marketplaces
 }
 
 function target(item: Item) {
@@ -207,7 +208,7 @@ async function installPlugin(context: FlowContext): Promise<Screen> {
   return { name: "prompt", title: "Install plugin", nextStep, onDone }
 }
 
-async function marketplaceList(context: FlowContext): Promise<Screen> {
+export async function marketplaceList(context: FlowContext): Promise<Screen> {
   const lists = await Promise.all(
     context.adapters.map(async (adapter) => ((await adapter.marketplaces?.(context.roots)) ?? []).map((entry) => ({ ...entry, harness: adapter.id }))),
   )
@@ -258,7 +259,7 @@ export async function projectList(context: FlowContext): Promise<Screen> {
   return { name: "projects", projects: lists.flat() }
 }
 
-// Only the harness's data folder goes; the project folder stays. apply moves it into the backup.
-export function deleteProject(project: ProjectData, context: FlowContext): void {
-  context.open({ name: "review", plan: { ...emptyPlan(), removals: [project.dataDir] }, secrets: [] })
+// Only the harness's data folders go; the project folders stay. apply moves them into the backup.
+export function deleteProjects(projects: ProjectData[], context: FlowContext): void {
+  context.open({ name: "review", plan: { ...emptyPlan(), removals: projects.map((project) => project.dataDir) }, secrets: [] })
 }
