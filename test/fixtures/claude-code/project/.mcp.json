@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "files": { "command": "files-mcp", "args": ["--root", "."], "env": { "TOKEN": "${TOKEN}" }, "timeout": 5000 },
+    "off-server": { "command": "off-mcp" },
+    "sock": { "type": "ws", "url": "ws://localhost:9000" },
+    "remote": { "type": "streamable-http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer ${KEY}" } }
+  }
+}
