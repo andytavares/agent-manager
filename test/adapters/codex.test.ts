@@ -98,7 +98,7 @@ test("global MCP servers map url, bearer token and headers; extra keys go to nat
       enabled: true,
       url: "https://mcp.linear.app/mcp",
       headers: { "X-Team": "core", Authorization: "Bearer ${LINEAR_TOKEN}" },
-      native: { bearer_token_env_var: "LINEAR_TOKEN", startup_timeout_sec: 20 },
+      native: { startup_timeout_sec: 20 },
     },
   })
 })
@@ -408,4 +408,12 @@ test("marketplaces come from the marketplace.json files Codex reads", async () =
     { name: "team", source: join(project, ".agents/plugins/marketplace.json") },
     { name: "legacy", source: join(project, ".claude-plugin/marketplace.json") },
   ])
+})
+
+test("read shows env_vars and env_http_headers as ${VAR} refs, so another harness can use them", async () => {
+  appendFileSync(globalConfig(), '\n[mcp_servers.refs]\ncommand = "k"\nenv_vars = ["A"]\nenv_http_headers = { X-B = "B" }\n')
+  const { server } = await mcpServer("refs")
+  expect(server.env).toEqual({ A: "${A}" })
+  expect(server.headers).toEqual({ "X-B": "${B}" })
+  expect(server.native).toEqual({})
 })

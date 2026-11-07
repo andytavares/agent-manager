@@ -84,6 +84,7 @@ export interface Change {
   item?: Item // update, delete, move, copy
   name?: string // create: memory file name (from memoryFiles, "<name>" filled) or skill folder name
   text?: string // full new text: memory file or SKILL.md
+  before?: string // update: the text the editor opened with, so an outside edit since then is caught as stale
   destination?: string // move, copy: destination skill root
   server?: McpServer // mcp create, update; on delete only for masking secrets in review
   // plugin: create = install, delete = uninstall, update = enable/disable when plugin.enabled changes, else version update

@@ -38,3 +38,10 @@ test("read-only items and move are refused", async () => {
   await expect(planMemoryFile({ kind: "memory", op: "delete", target, item: item(path, { readOnly: "managed policy" }) }, options)).rejects.toThrow("read-only (managed policy)")
   await expect(planMemoryFile({ kind: "memory", op: "move", target, item: item(path) }, options)).rejects.toThrow("Codex: memory files cannot move")
 })
+
+test("update uses the text the editor opened with, so a later outside edit is caught as stale", async () => {
+  const path = join(root, "AGENTS.md")
+  writeFileSync(path, "changed outside\n")
+  const plan = await planMemoryFile({ kind: "memory", op: "update", target, item: item(path), text: "mine\n", before: "opened\n" }, options)
+  expect(plan.edits).toEqual([{ path, before: "opened\n", after: "mine\n" }])
+})

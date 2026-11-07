@@ -74,7 +74,7 @@ export async function planSkill(change: Change, readers: HarnessId[]): Promise<W
   if (change.item!.readOnly) throw new Error(`${change.item!.name} is read-only: ${change.item!.readOnly}.`)
   if (change.op === "update") {
     const path = join(folder, "SKILL.md")
-    plan.edits.push({ path, before: await readFile(path, "utf8"), after: change.text! })
+    plan.edits.push({ path, before: change.before ?? (await readFile(path, "utf8")), after: change.text! })
   } else if (change.op === "delete") {
     plan.removals.push(folder)
   } else {

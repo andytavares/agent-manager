@@ -342,7 +342,7 @@ test("plan mcp update keeps comments and native keys, writes enabled: false, add
 
 test("plan mcp remote entry: type, url, headers; no ${VAR} notice for plain values", async () => {
   const item = await mcpItem("shared", "project")
-  const server: McpServer = { name: "shared", transport: "http", enabled: true, url: "https://x.example/mcp", headers: { A: "b" }, native: {} }
+  const server: McpServer = { name: "shared", transport: "http", enabled: false, url: "https://x.example/mcp", headers: { A: "b" }, native: {} }
   const { plan, edit } = await onlyEdit(mcpChange({ op: "update", item, server }))
   expect(edit.path).toBe(join(project, ".omp/mcp.json"))
   expect(parse(edit.after!).mcpServers.shared).toEqual({ type: "http", url: "https://x.example/mcp", headers: { A: "b" } })
@@ -432,4 +432,24 @@ test("marketplaces come from ~/.omp/marketplaces.json", async () => {
   } finally {
     rmSync(registry)
   }
+})
+
+test("a server held off by disabledServers reads as off; editing it keeps it off without enabled: false", async () => {
+  const item = await mcpItem("muted")
+  const detail = await omp.read(item)
+  expect(detail.type === "mcp" && detail.server.enabled).toBe(false)
+  const server = { name: "muted", transport: "stdio" as const, enabled: false, command: "muted-mcp-2", native: {} }
+  const { edit } = await onlyEdit(mcpChange({ op: "update", item, server }))
+  const after = parse(edit.after!)
+  expect(after.mcpServers.muted).toEqual({ command: "muted-mcp-2" })
+  expect(after.disabledServers).toEqual(["muted", "shared"])
+})
+
+test("turning on a server listed in disabledServers removes it from that list", async () => {
+  const item = await mcpItem("muted")
+  const server = { name: "muted", transport: "stdio" as const, enabled: true, command: "muted-mcp", native: {} }
+  const plan = await omp.plan(mcpChange({ op: "update", item, server }), roots())
+  const after = parse(plan.edits.at(-1)!.after!)
+  expect(after.disabledServers).toEqual(["shared"])
+  expect(after.mcpServers.muted.enabled).toBeUndefined()
 })

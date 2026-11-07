@@ -40,7 +40,7 @@ export async function editItem(item: Item, context: FlowContext): Promise<Screen
   const detail = await context.adapters.find((adapter) => adapter.id === item.harness)!.read(item)
   const initialText = detail.type === "text" ? detail.text : ""
   const title = item.kind === "skill" ? `${item.name}/SKILL.md` : item.name
-  return { name: "editor", title, initialText, toChange: (text) => ({ kind: item.kind, op: "update", target: target(item), item, text }) }
+  return { name: "editor", title, initialText, toChange: (text) => ({ kind: item.kind, op: "update", target: target(item), item, text, before: initialText }) }
 }
 
 // Project view adds Claude Code's local scope next to project.
@@ -138,7 +138,8 @@ async function editMcp(item: Item, context: FlowContext): Promise<Screen> {
 }
 
 async function copyMcp(item: Item, context: FlowContext): Promise<Screen> {
-  const server = await readServer(item, context)
+  // native keys belong to the source harness's format, so a copy starts without them.
+  const server = { ...(await readServer(item, context)), native: {} }
   const others = context.adapters.filter((adapter) => adapter.id !== item.harness)
   return { name: "mcpForm", title: `Copy ${item.name} to…`, server, targets: mcpTargets(others, context.scope), toChanges: createChanges }
 }

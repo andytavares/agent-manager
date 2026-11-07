@@ -24,7 +24,7 @@ export async function planMemoryFile(change: Change, options: MemoryPlanOptions)
   if (item.readOnly) throw new Error(`${label}: ${item.name} is read-only (${item.readOnly})`)
   if (change.op === "delete") return { ...emptyPlan(), removals: [item.path] }
   if (change.op !== "update") throw new Error(`${label}: memory files cannot ${change.op}`)
-  return { ...emptyPlan(), edits: [{ path: item.path, before: await readFile(item.path, "utf8"), after: change.text ?? "" }] }
+  return { ...emptyPlan(), edits: [{ path: item.path, before: change.before ?? (await readFile(item.path, "utf8")), after: change.text ?? "" }] }
 }
 
 function planCreate(change: Change, { label, scopeRoot, memoryFiles }: MemoryPlanOptions): WritePlan {

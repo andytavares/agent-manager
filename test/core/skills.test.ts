@@ -154,6 +154,11 @@ describe("planSkill", () => {
     })
   })
 
+  test("update uses the text the editor opened with when given", async () => {
+    const plan = await planSkill(change({ op: "update", item: item(), text: "new", before: "opened" }), ["claude-code"])
+    expect(plan.edits).toEqual([{ path: join(skills, "pdf/SKILL.md"), before: "opened", after: "new" }])
+  })
+
   test("delete removes the folder", async () => {
     expect(await planSkill(change({ op: "delete", item: item() }), [])).toEqual({
       ...empty,

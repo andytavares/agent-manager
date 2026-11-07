@@ -120,13 +120,16 @@ function mcpItems(ctx: Context, scope: Scope): Item[] {
 }
 
 function toMcpServer(name: string, entry: Table): McpServer {
-  const { command, args, env, url, http_headers, enabled, ...native } = entry
+  const { command, args, env, env_vars, url, http_headers, env_http_headers, bearer_token_env_var, enabled, ...native } = entry
   const headers: Record<string, string> = { ...http_headers }
-  if (native.bearer_token_env_var) headers.Authorization = `Bearer \${${native.bearer_token_env_var}}`
+  for (const [header, variable] of Object.entries<string>(env_http_headers ?? {})) headers[header] = `\${${variable}}`
+  if (bearer_token_env_var) headers.Authorization = `Bearer \${${bearer_token_env_var}}`
+  const envAll: Record<string, string> = { ...env }
+  for (const variable of (env_vars ?? []) as string[]) envAll[variable] = `\${${variable}}`
   const server: McpServer = { name, transport: url ? "http" : "stdio", enabled: enabled ?? true, native }
   if (command !== undefined) server.command = command
   if (args !== undefined) server.args = args
-  if (env !== undefined) server.env = env
+  if (Object.keys(envAll).length > 0) server.env = envAll
   if (url !== undefined) server.url = url
   if (Object.keys(headers).length > 0) server.headers = headers
   return server
@@ -210,8 +213,8 @@ const ENV_REF = /^\$\{(\w+)\}$/
 const BEARER_REF = /^Bearer \$\{(\w+)\}$/
 
 // Splits headers into Codex's bearer_token_env_var, env_http_headers (exact ${VAR}) and literal http_headers.
-function headerKeys(headers: Record<string, string>, native: Table): Table {
-  const keys: Table = { bearer_token_env_var: undefined, http_headers: {}, env_http_headers: { ...native.env_http_headers } }
+function headerKeys(headers: Record<string, string>): Table {
+  const keys: Table = { bearer_token_env_var: undefined, http_headers: {}, env_http_headers: {} }
   for (const [header, value] of Object.entries(headers)) {
     const bearer = header === "Authorization" && BEARER_REF.exec(value)
     const ref = ENV_REF.exec(value)
@@ -223,8 +226,8 @@ function headerKeys(headers: Record<string, string>, native: Table): Table {
 }
 
 // env values that are exactly ${KEY} become env_vars = ["KEY"]; the rest stay literal.
-function envKeys(env: Record<string, string>, native: Table): Table {
-  const keys: Table = { env: {}, env_vars: [...(native.env_vars ?? [])] }
+function envKeys(env: Record<string, string>): Table {
+  const keys: Table = { env: {}, env_vars: [] }
   for (const [name, value] of Object.entries(env)) {
     if (value === `\${${name}}`) keys.env_vars.includes(name) || keys.env_vars.push(name)
     else keys.env[name] = value
@@ -240,9 +243,9 @@ function toCodexTable(server: McpServer): Table {
   const table: Table = {
     command: server.command,
     args: server.args,
-    ...envKeys(server.env ?? {}, server.native),
+    ...envKeys(server.env ?? {}),
     url: server.url,
-    ...headerKeys(server.headers ?? {}, server.native),
+    ...headerKeys(server.headers ?? {}),
     ...native,
     enabled: server.enabled ? undefined : false,
   }

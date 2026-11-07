@@ -204,6 +204,8 @@ const planMemory = (change: Change, roots: Roots) =>
   planMemoryFile(change, { label: "omp", scopeRoot: (scope) => (scope === "global" ? agentDir(roots) : join(roots.project, ".omp")), memoryFiles: MEMORY_FILES })
 
 // User mcp.json disabledServers/enabledServers apply to servers from every source (mcp-config.md).
+const HELD_OFF = "off: listed in disabledServers of the user mcp.json"
+
 async function listMcp(ctx: Context): Promise<Item[]> {
   const userFile = join(ctx.agentDir, "mcp.json")
   const user = await readJsonc(userFile)
@@ -219,7 +221,8 @@ async function listMcp(ctx: Context): Promise<Item[]> {
     Object.entries(asRecord(data.mcpServers)).map(([name, server]) => {
       const off = disabled.has(name) || (asRecord(server).enabled === false && !forced.has(name))
       const allowed = source.allowed !== false && !off
-      return toItem(ctx, "mcp", { ...source, allowed, name, key: `mcpServers.${name}` })
+      const item = toItem(ctx, "mcp", { ...source, allowed, name, key: `mcpServers.${name}` })
+      return disabled.has(name) ? { ...item, warnings: [...(item.warnings ?? []), HELD_OFF] } : item
     }),
   )
 }
@@ -294,13 +297,13 @@ async function listPlugins(ctx: Context): Promise<Item[]> {
 
 async function readMcp(item: Item): Promise<McpServer> {
   const servers = asRecord((await readJsonc(item.path)).mcpServers)
-  const { type, command, args, env, url, headers, enabled: _enabled, ...native } = asRecord(servers[item.name])
+  const { type, command, args, env, url, headers, enabled, ...native } = asRecord(servers[item.name])
   // Discovery infers http for a URL-only entry (mcp-config.md).
   const transport = (type ?? (url !== undefined && command === undefined ? "http" : "stdio")) as McpServer["transport"]
   return {
     name: item.name,
     transport,
-    enabled: !item.offIn?.includes("omp"),
+    enabled: enabled !== false && !item.warnings?.includes(HELD_OFF), // project-config switches are not the server's own state
     ...(command !== undefined && { command: command as string }),
     ...(args !== undefined && { args: args as string[] }),
     ...(env !== undefined && { env: env as Record<string, string> }),
@@ -336,10 +339,28 @@ async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
     const server = change.server!
     const taken = server.name in asRecord((await readJsonc(path)).mcpServers)
     if (taken && server.name !== item?.name) throw new Error(`omp: ${server.name} already exists in ${path}`)
-    after = setJsonc(after, ["mcpServers", server.name], toEntry(server))
+    const entry = toEntry(server)
+    if (!server.enabled && (await userDisabled(roots)).includes(server.name)) delete entry.enabled // the list already holds it off
+    after = setJsonc(after, ["mcpServers", server.name], entry)
     if (hasEnvRef(server)) notices.push("omp may not expand ${VAR} in mcp.json; check the server starts.")
   }
-  return { ...emptyPlan(), edits: [{ path, before, after }], notices }
+  const plan: WritePlan = { ...emptyPlan(), edits: [{ path, before, after }], notices }
+  if (change.op !== "delete" && change.server!.enabled) await allowServer(plan, change.server!.name, join(agentDir(roots), "mcp.json"))
+  return plan
+}
+
+const userDisabled = async (roots: Roots) => strings((await readJsonc(join(agentDir(roots), "mcp.json"))).disabledServers)
+
+// The user mcp.json disabledServers list beats every entry's own switch, so turning a server on removes it there.
+async function allowServer(plan: WritePlan, name: string, userFile: string): Promise<void> {
+  const same = plan.edits.find((edit) => edit.path === userFile)
+  const text = same ? same.after! : await readText(userFile)
+  const list = strings(asRecord(parseJsonc(text ?? "{}")).disabledServers)
+  const index = list.indexOf(name)
+  if (index === -1) return
+  const after = setJsonc(text!, ["disabledServers", index], undefined)
+  if (same) same.after = after
+  else plan.edits.push({ path: userFile, before: text, after })
 }
 
 async function readPlugin(item: Item) {

@@ -19,7 +19,7 @@ const LINEAR: McpServer = {
   enabled: true,
   url: "https://mcp.linear.app/mcp",
   headers: { Authorization: "Bearer sk-live-123" },
-  native: {},
+  native: { timeout: 30 }, // a harness-only key that must not travel to another harness
 }
 
 beforeEach(() => {
@@ -142,6 +142,7 @@ test("copy to… excludes the item's own harness and plans a create in the chose
     await waitForText(setup, "/planned/codex/global.json")
     expect(changes).toHaveLength(1)
     expect(changes[0]).toMatchObject({ op: "create", target: { harness: "codex" }, server: { name: "linear", url: LINEAR.url } })
+    expect(changes[0]!.server!.native).toEqual({})
   } finally {
     setup.renderer.destroy()
   }
