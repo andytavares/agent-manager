@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
-import { parse, type ParseError } from "jsonc-parser"
-import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, PluginInfo, Roots, Scope } from "../core/model"
-import { planMemoryFile } from "../core/memory-plan"
+import { applyEdits, modify, parse, type JSONPath, type ParseError } from "jsonc-parser"
+import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, PluginInfo, Roots, Scope, WritePlan } from "../core/model"
+import { emptyPlan, planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders } from "../core/skills"
 
 type Shape = "v1" | "v2" | "unknown"
@@ -165,6 +165,56 @@ function toServer(name: string, entry: Config): McpServer {
   return server
 }
 
+// The shape a new or shape-unknown file gets. OPENCODE_VERSION in roots.env replaces `opencode --version` (tests).
+function installedShape(roots: Roots): "v1" | "v2" {
+  const binary = roots.env.OPENCODE_VERSION === undefined ? Bun.which("opencode") : null
+  const version = roots.env.OPENCODE_VERSION ?? (binary ? Bun.spawnSync([binary, "--version"]).stdout.toString() : "")
+  return /^\D*1\./.test(version.trim()) ? "v1" : "v2"
+}
+
+const toEnvRefs = (values: Record<string, string> | undefined) =>
+  values && Object.fromEntries(Object.entries(values).map(([k, v]) => [k, v.replace(/\$\{([^}]+)\}/g, "{env:$1}")]))
+
+function toEntry(server: McpServer, shape: "v1" | "v2"): Config {
+  const { type: _type, command: _command, url: _url, enabled: _enabled, disabled: _disabled, ...native } = server.native
+  const entry: Config =
+    server.transport === "stdio"
+      ? { ...native, type: "local", command: [server.command, ...(server.args ?? [])], environment: toEnvRefs(server.env) }
+      : { ...native, type: "remote", url: server.url, headers: toEnvRefs(server.headers) }
+  if (shape === "v1" && !server.enabled) entry.enabled = false
+  if (shape === "v2" && !server.enabled) entry.disabled = true
+  return JSON.parse(JSON.stringify(entry)) // drops undefined fields
+}
+
+const mcpPath = (shape: "v1" | "v2", name: string): JSONPath => (shape === "v1" ? ["mcp", name] : ["mcp", "servers", name])
+const FORMAT = { formattingOptions: { tabSize: 2, insertSpaces: true } }
+const setJsonc = (text: string, path: JSONPath, value: unknown) => applyEdits(text, modify(text, path, value, FORMAT))
+
+// Global files sit in the config dir, project files in the project root; .jsonc wins over .json, else a new .json.
+function createTarget(scope: Scope, roots: Roots): string {
+  const dir = scope === "global" ? configDir(roots) : roots.project
+  return [join(dir, "opencode.jsonc"), join(dir, "opencode.json")].find(existsSync) ?? join(dir, "opencode.json")
+}
+
+async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
+  const item = change.item
+  if (item?.readOnly) throw new Error(`OpenCode: ${item.name} is read-only (${item.readOnly})`)
+  const path = item ? item.path : createTarget(change.target.scope, roots)
+  const before = existsSync(path) ? await readFile(path, "utf8") : null
+  const data = before === null ? undefined : parseConfig(before)
+  const known = shapeOf(data)
+  const shape = item ? (item.key!.startsWith("mcp.servers.") ? "v2" : "v1") : known === "unknown" ? installedShape(roots) : known
+  let after = before ?? "{}\n"
+  if (item) after = setJsonc(after, mcpPath(shape, item.name), undefined)
+  if (change.op !== "delete") {
+    const server = change.server!
+    const taken = data && mcpEntries({ path, scope: change.target.scope, data, shape }).some(([key]) => serverName(key) === server.name)
+    if (taken && server.name !== item?.name) throw new Error(`OpenCode: ${server.name} already exists in ${path}`)
+    after = setJsonc(after, mcpPath(shape, server.name), toEntry(server, shape))
+  }
+  return { ...emptyPlan(), edits: [{ path, before, after }], notices: ["Restart OpenCode to load this change."] }
+}
+
 // ---- skills
 
 function skillRoots(roots: Roots): { dir: string; scope: Scope; off: boolean }[] {
@@ -263,6 +313,7 @@ export const opencode: HarnessAdapter = {
     return existsSync(configDir(roots))
   },
   async plan(change, roots) {
+    if (change.kind === "mcp") return planMcp(change, roots)
     if (change.kind !== "memory") throw new Error(`OpenCode: ${change.kind} changes are not supported yet`)
     return planMemory(change, roots)
   },

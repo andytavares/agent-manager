@@ -1,10 +1,10 @@
 import { existsSync, readdirSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join, parse as parsePath, relative } from "node:path"
-import { parse as parseJsonc, type ParseError } from "jsonc-parser"
+import { applyEdits, modify, parse as parseJsonc, type JSONPath, type ParseError } from "jsonc-parser"
 import { parse as parseYaml } from "yaml"
-import type { Change, HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope } from "../core/model"
-import { planMemoryFile } from "../core/memory-plan"
+import type { Change, HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
+import { emptyPlan, planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders } from "../core/skills"
 
 // omp (oh-my-pi). Paths and rules: https://github.com/can1357/oh-my-pi/tree/main/docs
@@ -309,6 +309,38 @@ async function readMcp(item: Item): Promise<McpServer> {
   }
 }
 
+function toEntry(server: McpServer): Record<string, unknown> {
+  const { type: _type, command: _command, url: _url, enabled: _enabled, ...native } = server.native
+  const entry: Record<string, unknown> =
+    server.transport === "stdio"
+      ? { ...native, command: server.command, args: server.args, env: server.env }
+      : { ...native, type: server.transport, url: server.url, headers: server.headers }
+  if (!server.enabled) entry.enabled = false
+  return JSON.parse(JSON.stringify(entry)) // drops undefined fields
+}
+
+const FORMAT = { formattingOptions: { tabSize: 2, insertSpaces: true } }
+const setJsonc = (text: string, path: JSONPath, value: unknown) => applyEdits(text, modify(text, path, value, FORMAT))
+const hasEnvRef = (server: McpServer) => Object.values({ ...server.env, ...server.headers }).some((value) => value.includes("${"))
+
+async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
+  const item = change.item
+  if (item?.readOnly) throw new Error(`omp: ${item.name} is read-only (${item.readOnly})`)
+  const path = item?.path ?? (change.target.scope === "global" ? join(agentDir(roots), "mcp.json") : join(roots.project, ".omp/mcp.json"))
+  const before = await readText(path)
+  let after = before ?? "{}\n"
+  if (item) after = setJsonc(after, ["mcpServers", item.name], undefined)
+  const notices = ["Restart omp to load this change."]
+  if (change.op !== "delete") {
+    const server = change.server!
+    const taken = server.name in asRecord((await readJsonc(path)).mcpServers)
+    if (taken && server.name !== item?.name) throw new Error(`omp: ${server.name} already exists in ${path}`)
+    after = setJsonc(after, ["mcpServers", server.name], toEntry(server))
+    if (hasEnvRef(server)) notices.push("omp may not expand ${VAR} in mcp.json; check the server starts.")
+  }
+  return { ...emptyPlan(), edits: [{ path, before, after }], notices }
+}
+
 async function readPlugin(item: Item) {
   const data = await readJsonc(item.path)
   const enabled = !item.offIn?.includes("omp")
@@ -332,6 +364,7 @@ export const omp: HarnessAdapter = {
   },
 
   async plan(change, roots) {
+    if (change.kind === "mcp") return planMcp(change, roots)
     if (change.kind !== "memory") throw new Error(`omp: ${change.kind} changes are not supported yet`)
     return planMemory(change, roots)
   },

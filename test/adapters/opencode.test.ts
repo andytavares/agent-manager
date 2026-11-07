@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parse } from "jsonc-parser"
 import { configShape, opencode } from "../../src/adapters/opencode"
-import type { Change, Item, Roots, Scope } from "../../src/core/model"
+import type { Change, Item, McpServer, Roots, Scope } from "../../src/core/model"
 
 const fixtures = join(import.meta.dir, "../fixtures/opencode")
 
@@ -207,7 +210,7 @@ test("plan refuses read-only items and kinds other than memory", async () => {
   const readOnly = { ...item!, readOnly: "imported from Codex" }
   await expect(opencode.plan(memoryChange({ op: "update", item: readOnly, text: "x" }), v2)).rejects.toThrow("imported from Codex")
   await expect(opencode.plan(memoryChange({ op: "delete", item: readOnly }), v2)).rejects.toThrow("imported from Codex")
-  await expect(opencode.plan(memoryChange({ kind: "mcp" }), v2)).rejects.toThrow("OpenCode: mcp changes are not supported yet")
+  await expect(opencode.plan(memoryChange({ kind: "plugin" }), v2)).rejects.toThrow("OpenCode: plugin changes are not supported yet")
 })
 
 test("memoryFiles names AGENTS.md for both scopes", () => {
@@ -231,4 +234,82 @@ test("skillRoots lists every scanned root; env opt-outs drop the .claude roots",
   for (const name of ["OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"]) {
     expect(await opencode.skillRoots(roots("v2", { [name]: "1" }))).toEqual(withoutClaude)
   }
+})
+
+// ---- mcp plans (plan never writes, so the fixtures are read in place)
+
+const mcpChange = (change: Partial<Change>): Change => ({ kind: "mcp", op: "create", target: { harness: "opencode", scope: "global" }, ...change })
+const stdio = (server: Partial<McpServer> = {}): McpServer => ({ name: "fs", transport: "stdio", enabled: true, command: "npx", args: ["-y", "fs-mcp"], native: {}, ...server })
+const restart = ["Restart OpenCode to load this change."]
+const afterOf = async (change: Change, r: Roots) => {
+  const plan = await opencode.plan(change, r)
+  expect(plan.notices).toEqual(restart)
+  expect(plan.edits).toHaveLength(1)
+  return plan.edits[0]!
+}
+const mcpItem = async (r: Roots, key: string, scope: Scope = "global") =>
+  (await opencode.list("mcp", r)).find((item) => item.key === key && item.scope === scope)!
+
+test("plan mcp update v2: comments survive, env refs become {env:VAR}, native kept, disabled dropped when on", async () => {
+  const item = await mcpItem(v2, "mcp.servers.fs")
+  const server = stdio({ env: { ROOT: "${HOME}/code" }, native: { timeout: 5000, type: "bogus", disabled: true } })
+  const edit = await afterOf(mcpChange({ op: "update", item, server }), v2)
+  expect(edit.path).toBe(item.path)
+  expect(edit.before).toContain("// global v2 config")
+  expect(edit.after).toContain("// global v2 config")
+  const data = parse(edit.after!)
+  expect(data.mcp.servers.fs).toEqual({ timeout: 5000, type: "local", command: ["npx", "-y", "fs-mcp"], environment: { ROOT: "{env:HOME}/code" } })
+  expect(Object.keys(data.mcp.servers)).toEqual(["linear", "fs"])
+})
+
+test("plan mcp v2 off writes disabled: true; v1 off writes enabled: false and on omits it", async () => {
+  const fs = await mcpItem(v2, "mcp.servers.fs")
+  const v2Off = await afterOf(mcpChange({ op: "update", item: fs, server: stdio({ enabled: false }) }), v2)
+  expect(parse(v2Off.after!).mcp.servers.fs).toEqual({ type: "local", command: ["npx", "-y", "fs-mcp"], disabled: true })
+  const github = await mcpItem(v1, "mcp.github")
+  const remote: McpServer = { name: "github", transport: "http", enabled: false, url: "https://gh.example/mcp", headers: { Authorization: "Bearer ${GH_TOKEN}" }, native: {} }
+  const v1Off = await afterOf(mcpChange({ op: "update", item: github, server: remote }), v1)
+  expect(v1Off.after).toContain("// global v1 config")
+  expect(parse(v1Off.after!).mcp.github).toEqual({ type: "remote", url: "https://gh.example/mcp", headers: { Authorization: "Bearer {env:GH_TOKEN}" }, enabled: false })
+  const v1On = await afterOf(mcpChange({ op: "update", item: github, server: { ...remote, enabled: true } }), v1)
+  expect(parse(v1On.after!).mcp.github.enabled).toBeUndefined()
+})
+
+test("plan mcp rename removes the old key and adds the new one; delete removes the key", async () => {
+  const item = await mcpItem(v2, "mcp.servers.fs")
+  const renamed = parse((await afterOf(mcpChange({ op: "update", item, server: stdio({ name: "files" }) }), v2)).after!)
+  expect(Object.keys(renamed.mcp.servers)).toEqual(["linear", "files"])
+  const deleted = await afterOf(mcpChange({ op: "delete", item }), v2)
+  expect(deleted.after).toContain("// global v2 config")
+  expect(Object.keys(parse(deleted.after!).mcp.servers)).toEqual(["linear"])
+})
+
+test("plan mcp create adds to the existing global file in its shape and refuses a taken name", async () => {
+  const edit = await afterOf(mcpChange({ server: stdio({ name: "new" }) }), v2)
+  expect(edit.path).toBe(join(v2.home, ".config/opencode/opencode.jsonc"))
+  expect(parse(edit.after!).mcp.servers.new).toEqual({ type: "local", command: ["npx", "-y", "fs-mcp"] })
+  const project = await afterOf(mcpChange({ target: { harness: "opencode", scope: "project" }, server: stdio({ name: "new" }) }), v1)
+  expect(project.path).toBe(join(v1.project, "opencode.jsonc"))
+  expect(parse(project.after!).mcp.new).toEqual({ type: "local", command: ["npx", "-y", "fs-mcp"] })
+  await expect(opencode.plan(mcpChange({ server: stdio({ name: "linear" }) }), v2)).rejects.toThrow("linear already exists")
+})
+
+test("plan mcp create in a new file takes the shape from OPENCODE_VERSION: 1.x is v1, otherwise v2", async () => {
+  const home = mkdtempSync(join(tmpdir(), "opencode-"))
+  const fresh = (version: string): Roots => ({ home, project: join(home, "project"), env: { OPENCODE_VERSION: version } })
+  const v1Edit = await afterOf(mcpChange({ server: stdio({ name: "new" }) }), fresh("1.4.2"))
+  expect(v1Edit.path).toBe(join(home, ".config/opencode/opencode.json"))
+  expect(v1Edit.before).toBeNull()
+  expect(parse(v1Edit.after!)).toEqual({ mcp: { new: { type: "local", command: ["npx", "-y", "fs-mcp"] } } })
+  const target = { harness: "opencode" as const, scope: "project" as const }
+  const v2Edit = await afterOf(mcpChange({ target, server: stdio({ name: "new" }) }), fresh("2.0.0"))
+  expect(v2Edit.path).toBe(join(home, "project/opencode.json"))
+  expect(parse(v2Edit.after!)).toEqual({ mcp: { servers: { new: { type: "local", command: ["npx", "-y", "fs-mcp"] } } } })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("plan mcp refuses read-only items", async () => {
+  const item = { ...(await mcpItem(v2, "mcp.servers.fs")), readOnly: "imported from Codex" }
+  await expect(opencode.plan(mcpChange({ op: "delete", item }), v2)).rejects.toThrow("imported from Codex")
+  await expect(opencode.plan(mcpChange({ op: "update", item, server: stdio() }), v2)).rejects.toThrow("imported from Codex")
 })

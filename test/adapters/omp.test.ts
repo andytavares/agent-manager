@@ -2,8 +2,9 @@ import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test"
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parse } from "jsonc-parser"
 import { omp } from "../../src/adapters/omp"
-import type { Change, Item, Kind, Roots, Scope } from "../../src/core/model"
+import type { Change, Item, Kind, McpServer, Roots, Scope } from "../../src/core/model"
 
 // A temp copy, because git cannot commit the .git folder and the empty .omp folder the walk-up needs.
 let base: string
@@ -315,4 +316,62 @@ test("local memory backend files are listed per project, on only with memory.bac
   expect(loaded.every(on)).toBe(true)
   expect((await omp.plan(memoryChange({ op: "delete", item: loaded[2] }), roots())).removals).toEqual([join(root, "learned.md")])
   rmSync(join(agentDir, "memories"), { recursive: true })
+})
+
+// ---- mcp plans
+
+const mcpChange = (change: Partial<Change>): Change => ({ kind: "mcp", op: "create", target: { harness: "omp", scope: "global" }, ...change })
+const restart = "Restart omp to load this change."
+const expandNotice = "omp may not expand ${VAR} in mcp.json; check the server starts."
+const mcpItem = async (name: string, scope: Scope = "global") => (await list("mcp")).find((i) => i.name === name && i.scope === scope)!
+const onlyEdit = async (change: Change, r = roots()) => {
+  const plan = await omp.plan(change, r)
+  expect(plan.edits).toHaveLength(1)
+  return { plan, edit: plan.edits[0]! }
+}
+
+test("plan mcp update keeps comments and native keys, writes enabled: false, adds the ${VAR} notice", async () => {
+  const item = await mcpItem("fs")
+  const server: McpServer = { name: "fs", transport: "stdio", enabled: false, command: "npx", args: ["fs-mcp"], env: { ROOT: "${HOME}" }, native: { cwd: "/work", command: "bogus" } }
+  const { plan, edit } = await onlyEdit(mcpChange({ op: "update", item, server }))
+  expect(edit.path).toBe(join(agentDir, "mcp.json"))
+  expect(edit.after).toContain("// user servers")
+  expect(parse(edit.after!).mcpServers.fs).toEqual({ cwd: "/work", command: "npx", args: ["fs-mcp"], env: { ROOT: "${HOME}" }, enabled: false })
+  expect(plan.notices).toEqual([restart, expandNotice])
+})
+
+test("plan mcp remote entry: type, url, headers; no ${VAR} notice for plain values", async () => {
+  const item = await mcpItem("shared", "project")
+  const server: McpServer = { name: "shared", transport: "http", enabled: true, url: "https://x.example/mcp", headers: { A: "b" }, native: {} }
+  const { plan, edit } = await onlyEdit(mcpChange({ op: "update", item, server }))
+  expect(edit.path).toBe(join(project, ".omp/mcp.json"))
+  expect(parse(edit.after!).mcpServers.shared).toEqual({ type: "http", url: "https://x.example/mcp", headers: { A: "b" } })
+  expect(plan.notices).toEqual([restart])
+})
+
+test("plan mcp rename replaces the key; delete removes it", async () => {
+  const item = await mcpItem("muted")
+  const renamed = await onlyEdit(mcpChange({ op: "update", item, server: { name: "quiet", transport: "stdio", enabled: true, command: "muted-mcp", native: {} } }))
+  const servers = parse(renamed.edit.after!).mcpServers
+  expect(Object.keys(servers)).toEqual(["github", "fs", "paused", "quiet"])
+  expect(servers.quiet).toEqual({ command: "muted-mcp" })
+  const deleted = await onlyEdit(mcpChange({ op: "delete", item }))
+  expect(deleted.edit.after).toContain("// user servers")
+  expect(Object.keys(parse(deleted.edit.after!).mcpServers)).toEqual(["github", "fs", "paused"])
+})
+
+test("plan mcp create makes a new mcp.json when absent and refuses a taken name", async () => {
+  const fresh = join(base, "fresh-mcp")
+  const server: McpServer = { name: "db", transport: "stdio", enabled: true, command: "db-mcp", native: {} }
+  const { edit } = await onlyEdit(mcpChange({ server }), roots({ env: { PI_CODING_AGENT_DIR: fresh } }))
+  expect(edit).toMatchObject({ path: join(fresh, "mcp.json"), before: null })
+  expect(parse(edit.after!)).toEqual({ mcpServers: { db: { command: "db-mcp" } } })
+  const target = { harness: "omp" as const, scope: "project" as const }
+  await expect(omp.plan(mcpChange({ target, server }), roots())).rejects.toThrow("db already exists")
+})
+
+test("plan mcp refuses read-only items; plugin changes are not supported yet", async () => {
+  const item = { ...(await mcpItem("fs")), readOnly: "imported from Codex" }
+  await expect(omp.plan(mcpChange({ op: "delete", item }), roots())).rejects.toThrow("imported from Codex")
+  await expect(omp.plan(mcpChange({ kind: "plugin" }), roots())).rejects.toThrow("omp: plugin changes are not supported yet")
 })
