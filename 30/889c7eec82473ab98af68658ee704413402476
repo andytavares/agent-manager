@@ -1,0 +1,36 @@
+src/core/skills.ts
+  s_b67d2564e0abf8::t_2326a29628c33e 1-27
+test/fixtures/skills/root/pdf/SKILL.md
+  s_b67d2564e0abf8::t_53a2474fe7a37f 1
+package.json
+  s_b67d2564e0abf8::t_dd27f37175e2b2 1-26
+tsconfig.json
+  s_b67d2564e0abf8::t_dd27f37175e2b2 1-16
+test/fixtures/skills/root/not-a-skill/README.md
+  s_b67d2564e0abf8::t_53a2474fe7a37f 1
+test/fixtures/skills/root/research/SKILL.md
+  s_b67d2564e0abf8::t_53a2474fe7a37f 1-6
+test/core/skills.test.ts
+  s_b67d2564e0abf8::t_53a2474fe7a37f 1-25
+src/core/model.ts
+  s_b67d2564e0abf8::t_2aaaee8132dadc 1-64
+  s_b67d2564e0abf8::t_cacfa37e9c8ccc 65-85
+bun.lock
+  s_b67d2564e0abf8::t_f4e391a04a8227 1-135
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "30889c7eec82473ab98af68658ee704413402476",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
