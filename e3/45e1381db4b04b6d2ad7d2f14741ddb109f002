@@ -1,0 +1,22 @@
+test/adapters/claude-code.test.ts
+  s_b67d2564e0abf8::t_805f8fed25bb58 262-337,339-344
+src/adapters/claude-code.ts
+  s_b67d2564e0abf8::t_340842c6486b12 36,313-346
+  s_b67d2564e0abf8::t_ebb7afa335395a 349,374
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e345e1381db4b04b6d2ad7d2f14741ddb109f002",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
