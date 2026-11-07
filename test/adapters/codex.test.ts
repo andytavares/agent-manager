@@ -342,6 +342,70 @@ test("plan refuses a read-only MCP server and an SSE server", async () => {
   await expect(codex.plan(mcpChange({ op: "update", item, server: { ...server, transport: "sse" } }), roots)).rejects.toThrow("SSE")
 })
 
-test("plan still throws for plugins", async () => {
-  await expect(codex.plan(mcpChange({ op: "create", kind: "plugin" }), roots)).rejects.toThrow("Codex: plugin changes are not supported yet")
+const pluginChange = (fields: Partial<Change> & Pick<Change, "op">): Change => ({ kind: "plugin", target: { harness: "codex", scope: "global" }, ...fields })
+const command = (argv: string[]) => ({ argv, touches: [globalConfig()], cwd: roots.project })
+
+test("plan enables a plugin in place and keeps the config's comments", async () => {
+  const item = (await byName("plugin"))["linear@official"]!
+  const before = readFileSync(globalConfig(), "utf8")
+  const plan = await codex.plan(pluginChange({ op: "update", item, plugin: { name: item.name, enabled: true } }), roots)
+  const after = before.replace('[plugins."linear@official"]\nenabled = false', '[plugins."linear@official"]\nenabled = true')
+  expect(after).not.toBe(before)
+  expect(plan).toEqual({ ...editsOnly([{ path: globalConfig(), before, after }]), notices: [SESSION_NOTICE] })
+})
+
+test("plan disables a plugin with no config entry by appending its table", async () => {
+  const item = (await byName("plugin"))["github@official"]!
+  const before = readFileSync(globalConfig(), "utf8")
+  const plan = await codex.plan(pluginChange({ op: "update", item, plugin: { name: item.name, enabled: false } }), roots)
+  expect(plan.edits).toEqual([{ path: globalConfig(), before, after: `${before}\n[plugins."github@official"]\nenabled = false\n` }])
+})
+
+test("plan toggles a plugin in the trusted project config when it is set there", async () => {
+  trustProject()
+  const item = (await byName("plugin"))["github@official"]!
+  const path = join(project, ".codex/config.toml")
+  const before = readFileSync(path, "utf8")
+  const plan = await codex.plan(pluginChange({ op: "update", item, plugin: { name: item.name, enabled: true } }), roots)
+  expect(plan.edits).toEqual([{ path, before, after: before.replace("enabled = false # project", "enabled = true # project") }])
+})
+
+test("plan installs and uninstalls a plugin with codex plugin add and remove", async () => {
+  const install = await codex.plan(pluginChange({ op: "create", plugin: { name: "figma@official", enabled: true } }), roots)
+  expect(install).toEqual({ ...editsOnly([]), commands: [command(["codex", "plugin", "add", "figma@official"])], notices: [SESSION_NOTICE] })
+  const item = (await byName("plugin"))["github@official"]!
+  const uninstall = await codex.plan(pluginChange({ op: "delete", item }), roots)
+  expect(uninstall.commands).toEqual([command(["codex", "plugin", "remove", "github@official"])])
+})
+
+test("plan adds and removes a marketplace with codex plugin marketplace", async () => {
+  const add = await codex.plan(pluginChange({ op: "create", marketplace: "openai/codex-plugins" }), roots)
+  expect(add.commands).toEqual([command(["codex", "plugin", "marketplace", "add", "openai/codex-plugins"])])
+  const remove = await codex.plan(pluginChange({ op: "delete", marketplace: "official" }), roots)
+  expect(remove.commands).toEqual([command(["codex", "plugin", "marketplace", "remove", "official"])])
+})
+
+test("plan refuses a plugin version update and a read-only plugin", async () => {
+  const item = (await byName("plugin"))["github@official"]!
+  await expect(codex.plan(pluginChange({ op: "update", item, plugin: { name: item.name, enabled: true, version: "2.0.0" } }), roots)).rejects.toThrow(
+    "Codex: plugin update is not available from the command line; use the Codex app",
+  )
+  const locked = { ...item, readOnly: "imported from Claude Code" }
+  await expect(codex.plan(pluginChange({ op: "delete", item: locked }), roots)).rejects.toThrow("imported from Claude Code")
+})
+
+test("marketplaces come from the marketplace.json files Codex reads", async () => {
+  expect(await codex.marketplaces!(roots)).toEqual([])
+  const write = (path: string, name: string) => {
+    mkdirSync(join(path, ".."), { recursive: true })
+    writeFileSync(path, JSON.stringify({ name, plugins: [] }))
+  }
+  write(join(home, ".agents/plugins/marketplace.json"), "personal")
+  write(join(project, ".agents/plugins/marketplace.json"), "team")
+  write(join(project, ".claude-plugin/marketplace.json"), "legacy")
+  expect(await codex.marketplaces!(roots)).toEqual([
+    { name: "personal", source: join(home, ".agents/plugins/marketplace.json") },
+    { name: "team", source: join(project, ".agents/plugins/marketplace.json") },
+    { name: "legacy", source: join(project, ".claude-plugin/marketplace.json") },
+  ])
 })

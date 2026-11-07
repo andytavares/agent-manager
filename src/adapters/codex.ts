@@ -261,6 +261,10 @@ function patchServers(text: string, servers: Table): string {
 // shortcut: strips the [mcp_servers] header stringify adds; upgrade if toml-patch gains a section option.
 function appendServer(text: string, server: McpServer): string {
   const section = stringify({ mcp_servers: { [server.name]: toCodexTable(server) } }, { inlineTableStart: 2 }).replace(/^\[mcp_servers\]\n\n/, "")
+  return appendSection(text, section)
+}
+
+function appendSection(text: string, section: string): string {
   const separator = text === "" ? "" : text.endsWith("\n") ? "\n" : "\n\n"
   return text + separator + section
 }
@@ -286,13 +290,57 @@ async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
   const path = item?.path ?? (change.target.scope === "global" ? ctx.globalPath : ctx.projectPath)
   const before = existsSync(path) ? readFileSync(path, "utf8") : null
   const after = editMcpServers(before ?? "", path, change)
-  const notices = ["Start a new Codex session to load this change."]
+  const notices = [SESSION_NOTICE]
   if (path === ctx.projectPath && !ctx.trusted) notices.push("Codex ignores this file until you trust the project.")
   return { ...emptyPlan(), edits: [{ path, before, after }], notices }
 }
 
+const SESSION_NOTICE = "Start a new Codex session to load this change."
+
+// Plugin subcommands from the CLI source (openai/codex@57a808a):
+// `codex plugin add|remove PLUGIN@MARKETPLACE`: https://github.com/openai/codex/blob/57a808a3920f05f2d4b9eab2d0493e1df136ae6b/codex-rs/cli/src/plugin_cmd.rs#L62-L81
+// `codex plugin marketplace add SOURCE | remove MARKETPLACE_NAME`: https://github.com/openai/codex/blob/57a808a3920f05f2d4b9eab2d0493e1df136ae6b/codex-rs/cli/src/marketplace_cmd.rs#L43-L58
+// There is no plugin upgrade or enable/disable subcommand; enable/disable edits [plugins."<name>"] in config.toml.
+function pluginCommand(change: Change): string[] {
+  const { op, item, plugin, marketplace } = change
+  if (!plugin && !item && marketplace) return ["codex", "plugin", "marketplace", op === "create" ? "add" : "remove", marketplace]
+  if (op === "create") return ["codex", "plugin", "add", plugin!.name]
+  if (op === "delete") return ["codex", "plugin", "remove", item!.name]
+  throw new Error(`Codex: plugin ${op} is not available from the command line; use the Codex app`)
+}
+
+function editPluginEnabled(text: string, name: string, enabled: boolean): string {
+  const doc = parse(text) as Table
+  if (!doc.plugins?.[name]) return appendSection(text, `[plugins.${JSON.stringify(name)}]\nenabled = ${enabled}\n`)
+  doc.plugins[name].enabled = enabled
+  return patch(text, doc)
+}
+
+async function planPlugin(change: Change, roots: Roots): Promise<WritePlan> {
+  const { item, plugin } = change
+  if (item?.readOnly) throw new Error(`Codex: ${item.name} is read-only (${item.readOnly})`)
+  const ctx = context(roots)
+  const notices = [SESSION_NOTICE]
+  const toggles = change.op === "update" && item && plugin && plugin.enabled === Boolean(item.offIn?.includes("codex"))
+  if (!toggles) return { ...emptyPlan(), commands: [{ argv: pluginCommand(change), touches: [ctx.globalPath], cwd: roots.project }], notices }
+  const path = ctx.trusted && ctx.project.plugins?.[item.name] ? ctx.projectPath : ctx.globalPath
+  const before = existsSync(path) ? readFileSync(path, "utf8") : null
+  return { ...emptyPlan(), edits: [{ path, before, after: editPluginEnabled(before ?? "", item.name, plugin.enabled) }], notices }
+}
+
+// Marketplace files the Codex plugin docs name: personal, repo, and the legacy Claude-style location.
+async function marketplaces(roots: Roots): Promise<{ name: string; source: string }[]> {
+  const root = projectDirs(roots.project)[0]!
+  const files = [join(roots.home, ".agents/plugins/marketplace.json"), join(root, ".agents/plugins/marketplace.json"), join(root, ".claude-plugin/marketplace.json")]
+  return files.filter(existsSync).map((source) => {
+    const data = JSON.parse(readFileSync(source, "utf8")) as Table
+    return { name: typeof data.name === "string" ? data.name : basename(dirname(dirname(source))), source }
+  })
+}
+
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
   if (change.kind === "mcp") return planMcp(change, roots)
+  if (change.kind === "plugin") return planPlugin(change, roots)
   if (change.kind !== "memory") throw new Error(`Codex: ${change.kind} changes are not supported yet`)
   if (change.op === "update" && change.item?.warnings?.includes(GENERATED_WARNING)) throw new Error("Codex: generated memories can only be read or deleted")
   const scopeRoot = (scope: Scope) => (scope === "global" ? context(roots).codexHome : projectDirs(roots.project)[0]!)
@@ -318,4 +366,5 @@ export const codex: HarnessAdapter = {
   plan,
   memoryFiles: MEMORY_FILES,
   skillRoots,
+  marketplaces,
 }
