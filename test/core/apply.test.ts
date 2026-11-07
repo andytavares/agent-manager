@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test"
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -214,4 +214,20 @@ test("the default runner runs a real argv", async () => {
 test("defaultBackupRoot uses XDG_STATE_HOME, else ~/.local/state", () => {
   expect(defaultBackupRoot({ home: "/h", project: "/p", env: { XDG_STATE_HOME: "/s" } })).toBe("/s/agent-manager/backups")
   expect(defaultBackupRoot({ home: "/h", project: "/p", env: {} })).toBe("/h/.local/state/agent-manager/backups")
+})
+
+test("a command runs in its cwd", async () => {
+  const seen: (string | undefined)[] = []
+  const run = async (_argv: string[], cwd?: string) => {
+    seen.push(cwd)
+    return { code: 0, stderr: "" }
+  }
+  await applyPlan(plan({ commands: [{ argv: ["claude", "mcp"], touches: [], cwd: dir }, { argv: ["x"], touches: [] }] }), { backupRoot: join(dir, "b"), run })
+  expect(seen).toEqual([dir, undefined])
+})
+
+test("the default runner uses the command cwd", async () => {
+  const out = join(dir, "pwd.txt")
+  await applyPlan(plan({ commands: [{ argv: ["sh", "-c", `pwd -P > "${out}"`], touches: [], cwd: dir }] }), { backupRoot: join(dir, "b2") })
+  expect((await Bun.file(out).text()).trim()).toBe(realpathSync(dir))
 })

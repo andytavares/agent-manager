@@ -3,7 +3,7 @@ import { cp, mkdir, readFile, rename, rm, unlink, writeFile } from "node:fs/prom
 import { dirname, join } from "node:path"
 import type { Roots, WritePlan } from "./model"
 
-export type CommandRunner = (argv: string[]) => Promise<{ code: number; stderr: string }>
+export type CommandRunner = (argv: string[], cwd?: string) => Promise<{ code: number; stderr: string }>
 
 export interface ApplyOptions {
   backupRoot: string
@@ -44,8 +44,8 @@ export async function applyPlan(plan: WritePlan, options: ApplyOptions): Promise
     await cp(from, to, { recursive: true })
   }
   const run = options.run ?? runCommand
-  for (const { argv } of plan.commands) {
-    const { code, stderr } = await run(argv)
+  for (const { argv, cwd } of plan.commands) {
+    const { code, stderr } = await run(argv, cwd)
     if (code !== 0) throw new CommandError(argv, code, stderr)
   }
   return { backupDir, notices: plan.notices }
@@ -119,8 +119,8 @@ function timestamp(date: Date): string {
   return `${day}T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}`
 }
 
-async function runCommand(argv: string[]): Promise<{ code: number; stderr: string }> {
-  const child = Bun.spawn(argv, { stdout: "ignore", stderr: "pipe" })
+async function runCommand(argv: string[], cwd?: string): Promise<{ code: number; stderr: string }> {
+  const child = Bun.spawn(argv, { cwd, stdout: "ignore", stderr: "pipe" })
   const stderr = await new Response(child.stderr).text()
   return { code: await child.exited, stderr }
 }

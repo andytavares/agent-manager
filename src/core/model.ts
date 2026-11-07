@@ -64,7 +64,7 @@ export interface HarnessAdapter {
   detect(roots: Roots): Promise<boolean>
   list(kind: Kind, roots: Roots): Promise<Item[]>
   read(item: Item): Promise<ItemDetail>
-  // Builds the write plan for a memory change (later: mcp, plugin). Skills are planned in src/core/skills.ts.
+  // Builds the write plan for a memory or MCP change (later: plugin). Skills are planned in src/core/skills.ts.
   // Throws an Error with a user-facing message when the change is not allowed.
   plan(change: Change, roots: Roots): Promise<WritePlan>
   // Memory file names a user can create per scope, relative to that scope's root; "<name>" is filled in by the user.
@@ -100,6 +100,6 @@ export interface WritePlan {
   moves: { from: string; to: string }[] // files or folders
   copies: { from: string; to: string }[] // files or folders
   removals: string[] // files or folders, moved into the backup instead of deleted
-  commands: { argv: string[]; touches: string[] }[] // touches = files backed up before the command runs
+  commands: { argv: string[]; touches: string[]; cwd?: string }[] // touches = files backed up before the command runs
   notices: string[] // shown after apply, e.g. "Restart Claude Code sessions to load this change."
 }
