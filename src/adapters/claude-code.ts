@@ -1,13 +1,24 @@
 import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
-import { join } from "node:path"
+import { join, relative } from "node:path"
 import { parse, type ParseError } from "jsonc-parser"
-import { HARNESS_LABELS, type HarnessAdapter, type Item, type Kind, type McpServer, type Roots, type Scope } from "../core/model"
-import { listSkillFolders } from "../core/skills"
+import {
+  HARNESS_LABELS,
+  type Change,
+  type HarnessAdapter,
+  type Item,
+  type Kind,
+  type McpServer,
+  type Roots,
+  type Scope,
+  type WritePlan,
+} from "../core/model"
+import { listSkillFolders, parseFrontmatter } from "../core/skills"
 
 type Json = Record<string, any>
 
 const ID = "claude-code"
+const LABEL = HARNESS_LABELS[ID]
 const OFF = { loadedBy: [], offIn: [ID] } satisfies Partial<Item>
 const WS_READ_ONLY = "ws transport: edit with claude mcp add-json"
 const TRANSPORTS: Record<string, McpServer["transport"]> = {
@@ -51,12 +62,15 @@ function existingFiles(root: string, names: string[], fields: Partial<Item> & { 
     .map((name) => item("memory", fields.scope, name, join(root, name), fields))
 }
 
-async function autoMemory(roots: Roots, configDir: string, settings: Json): Promise<Item[]> {
+function autoMemoryDir(roots: Roots, configDir: string, settings: Json): string {
   const custom = settings.autoMemoryDirectory
-  const dir =
-    typeof custom === "string"
-      ? custom.replace(/^~(?=\/|$)/, roots.home)
-      : join(configDir, "projects", roots.project.replace(/[/.]/g, "-"), "memory")
+  return typeof custom === "string"
+    ? custom.replace(/^~(?=\/|$)/, roots.home)
+    : join(configDir, "projects", roots.project.replace(/[/.]/g, "-"), "memory")
+}
+
+async function autoMemory(roots: Roots, configDir: string, settings: Json): Promise<Item[]> {
+  const dir = autoMemoryDir(roots, configDir, settings)
   const state = settings.autoMemoryEnabled === false ? OFF : {}
   return existingFiles(dir, await markdownFiles(dir, ""), { scope: "project", ...state })
 }
@@ -175,6 +189,76 @@ async function readPlugin(item: Item) {
   return { name: item.name, enabled: !item.offIn?.includes(ID), version: record?.version, source }
 }
 
+const MEMORY_FILES: Record<Scope, string[]> = {
+  global: ["CLAUDE.md", "rules/<name>.md"],
+  project: ["CLAUDE.md", ".claude/CLAUDE.md", ".claude/rules/<name>.md", "AGENTS.md", "memory/<name>.md"],
+  local: ["CLAUDE.local.md"],
+}
+const AUTO_MEMORY_ENTRY = "memory/<name>.md"
+
+const emptyPlan = (): WritePlan => ({ edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] })
+const readText = async (path: string) => (existsSync(path) ? readFile(path, "utf8") : null)
+
+function memoryPattern(pattern: string): RegExp {
+  return new RegExp(`^${pattern.replaceAll(".", "\\.").replace("<name>", "[a-z0-9][a-z0-9-_]*")}$`)
+}
+
+function memoryIndexLine(fileName: string, text: string): string {
+  const { data } = parseFrontmatter(text)
+  const title = typeof data.name === "string" ? data.name : fileName.replace(/\.md$/, "")
+  return `- [${title}](${fileName})${typeof data.description === "string" ? ` — ${data.description}` : ""}`
+}
+
+async function planCreate(change: Change, roots: Roots, autoDir: string): Promise<WritePlan> {
+  const { scope } = change.target
+  const name = change.name ?? ""
+  const pattern = MEMORY_FILES[scope].find((candidate) => memoryPattern(candidate).test(name))
+  if (!pattern) throw new Error(`${LABEL}: ${name} is not a ${scope} memory file`)
+  const isAutoEntry = pattern === AUTO_MEMORY_ENTRY
+  const scopeRoot = scope === "global" ? configPaths(roots).configDir : roots.project
+  const path = isAutoEntry ? join(autoDir, name.slice("memory/".length)) : join(scopeRoot, name)
+  if (existsSync(path)) throw new Error(`${LABEL}: ${path} already exists`)
+  const text = change.text ?? ""
+  const plan = emptyPlan()
+  plan.edits.push({ path, before: null, after: text })
+  if (isAutoEntry) {
+    const indexPath = join(autoDir, "MEMORY.md")
+    const before = await readText(indexPath)
+    const head = before && !before.endsWith("\n") ? `${before}\n` : (before ?? "")
+    plan.edits.push({ path: indexPath, before, after: `${head}${memoryIndexLine(relative(autoDir, path), text)}\n` })
+  }
+  return plan
+}
+
+async function planDelete(item: Item, autoDir: string): Promise<WritePlan> {
+  const plan = emptyPlan()
+  plan.removals.push(item.path)
+  const indexPath = join(autoDir, "MEMORY.md")
+  const before = item.path.startsWith(`${autoDir}/`) && item.path !== indexPath ? await readText(indexPath) : null
+  if (before === null) return plan
+  const link = `(${relative(autoDir, item.path)})`
+  const after = before
+    .split("\n")
+    .filter((line) => !line.includes(link))
+    .join("\n")
+  if (after !== before) plan.edits.push({ path: indexPath, before, after })
+  return plan
+}
+
+async function plan(change: Change, roots: Roots): Promise<WritePlan> {
+  if (change.kind !== "memory") throw new Error(`${LABEL}: ${change.kind} changes are not supported yet`)
+  const { configDir } = configPaths(roots)
+  const autoDir = autoMemoryDir(roots, configDir, (await readJson(join(configDir, "settings.json"))) ?? {})
+  if (change.op === "create") return planCreate(change, roots, autoDir)
+  const item = change.item!
+  if (item.readOnly) throw new Error(`${LABEL}: ${item.name} is read-only (${item.readOnly})`)
+  if (change.op === "delete") return planDelete(item, autoDir)
+  if (change.op !== "update") throw new Error(`${LABEL}: memory files cannot ${change.op}`)
+  const plan = emptyPlan()
+  plan.edits.push({ path: item.path, before: await readFile(item.path, "utf8"), after: change.text ?? "" })
+  return plan
+}
+
 const LISTERS: Record<Kind, (roots: Roots) => Promise<Item[]>> = {
   memory: listMemory,
   mcp: listMcp,
@@ -184,8 +268,16 @@ const LISTERS: Record<Kind, (roots: Roots) => Promise<Item[]>> = {
 
 export const claudeCode: HarnessAdapter = {
   id: ID,
-  label: HARNESS_LABELS[ID],
+  label: LABEL,
   scopes: ["global", "project", "local"],
+  memoryFiles: MEMORY_FILES,
+  plan,
+  async skillRoots(roots) {
+    return [
+      { path: join(configPaths(roots).configDir, "skills"), scope: "global" },
+      { path: join(roots.project, ".claude/skills"), scope: "project" },
+    ]
+  },
   async detect(roots) {
     const { configDir, claudeJson } = configPaths(roots)
     return existsSync(configDir) || existsSync(claudeJson)

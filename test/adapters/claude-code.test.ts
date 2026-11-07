@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, expect, test } from "bun:test"
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { claudeCode } from "../../src/adapters/claude-code"
-import type { Item, Kind, Roots } from "../../src/core/model"
+import type { Change, FileEdit, Item, Kind, Roots, WritePlan } from "../../src/core/model"
 
 // A temp copy, because the auto memory folder name and some JSON keys hold absolute paths.
 let base: string
@@ -180,4 +180,95 @@ test("reads a plugin", async () => {
     type: "plugin",
     plugin: { name: "gamma@mkt", enabled: true, version: "1.0.0", source: "mkt" },
   })
+})
+
+const memoryChange = (fields: Partial<Change> & Pick<Change, "op">): Change => ({
+  kind: "memory",
+  target: { harness: "claude-code", scope: "project" },
+  ...fields,
+})
+const editsOnly = (edits: FileEdit[]): WritePlan => ({ edits, moves: [], copies: [], removals: [], commands: [], notices: [] })
+
+test("plan creates a memory file under the scope root", async () => {
+  const global = memoryChange({ op: "create", target: { harness: "claude-code", scope: "global" }, name: "rules/new-rule.md", text: "Rule\n" })
+  expect(await claudeCode.plan(global, roots())).toEqual(
+    editsOnly([{ path: join(home, ".claude/rules/new-rule.md"), before: null, after: "Rule\n" }]),
+  )
+  const local = memoryChange({ op: "create", target: { harness: "claude-code", scope: "local" }, name: "CLAUDE.local.md" })
+  expect(await claudeCode.plan(local, roots({ project: agentsOnly }))).toEqual(
+    editsOnly([{ path: join(agentsOnly, "CLAUDE.local.md"), before: null, after: "" }]),
+  )
+})
+
+test("plan refuses a name outside memoryFiles and a file that exists", async () => {
+  await expect(claudeCode.plan(memoryChange({ op: "create", name: "notes.md" }), roots())).rejects.toThrow("notes.md")
+  await expect(claudeCode.plan(memoryChange({ op: "create", name: ".claude/rules/Bad Name.md" }), roots())).rejects.toThrow()
+  await expect(claudeCode.plan(memoryChange({ op: "create", name: "CLAUDE.local.md" }), roots())).rejects.toThrow()
+  await expect(claudeCode.plan(memoryChange({ op: "create", name: "CLAUDE.md" }), roots())).rejects.toThrow("already exists")
+})
+
+test("plan updates and deletes a memory file", async () => {
+  const rules = byName(await list("memory"), ".claude/rules/api.md")
+  const before = readFileSync(rules.path, "utf8")
+  expect(await claudeCode.plan(memoryChange({ op: "update", item: rules, text: "New\n" }), roots())).toEqual(
+    editsOnly([{ path: rules.path, before, after: "New\n" }]),
+  )
+  expect(await claudeCode.plan(memoryChange({ op: "delete", item: rules }), roots())).toEqual({
+    ...editsOnly([]),
+    removals: [rules.path],
+  })
+})
+
+test("plan refuses to update or delete a read-only item", async () => {
+  const locked: Item = { ...byName(await list("memory"), "CLAUDE.md"), readOnly: "imported from Codex" }
+  await expect(claudeCode.plan(memoryChange({ op: "update", item: locked, text: "x" }), roots())).rejects.toThrow("imported from Codex")
+  await expect(claudeCode.plan(memoryChange({ op: "delete", item: locked }), roots())).rejects.toThrow("imported from Codex")
+})
+
+test("an auto memory entry is created in the auto memory dir and indexed in MEMORY.md", async () => {
+  const r = roots({ env: { CLAUDE_CONFIG_DIR: join(base, "auto-config") } })
+  const dir = join(base, "auto-config/projects", project.replace(/[/.]/g, "-"), "memory")
+  const text = "---\nname: Build steps\ndescription: how to build the app\n---\nRun make.\n"
+  expect(await claudeCode.plan(memoryChange({ op: "create", name: "memory/build.md", text }), r)).toEqual(
+    editsOnly([
+      { path: join(dir, "build.md"), before: null, after: text },
+      { path: join(dir, "MEMORY.md"), before: null, after: "- [Build steps](build.md) — how to build the app\n" },
+    ]),
+  )
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, "MEMORY.md"), "# Index")
+  const plain = await claudeCode.plan(memoryChange({ op: "create", name: "memory/plain.md", text: "Plain\n" }), r)
+  expect(plain.edits[1]).toEqual({ path: join(dir, "MEMORY.md"), before: "# Index", after: "# Index\n- [plain](plain.md)\n" })
+})
+
+test("deleting an auto memory entry removes its MEMORY.md lines; deleting MEMORY.md is a plain delete", async () => {
+  const r = roots({ env: { CLAUDE_CONFIG_DIR: join(base, "auto-delete") } })
+  const dir = join(base, "auto-delete/projects", project.replace(/[/.]/g, "-"), "memory")
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, "old.md"), "Old\n")
+  const index = "# Index\n- [Old](old.md) — stale\n- [Keep](keep.md)\n- again [Old](old.md)\n"
+  writeFileSync(join(dir, "MEMORY.md"), index)
+  const memory = await list("memory", r)
+  expect(await claudeCode.plan(memoryChange({ op: "delete", item: byName(memory, "old.md") }), r)).toEqual({
+    ...editsOnly([{ path: join(dir, "MEMORY.md"), before: index, after: "# Index\n- [Keep](keep.md)\n" }]),
+    removals: [join(dir, "old.md")],
+  })
+  expect(await claudeCode.plan(memoryChange({ op: "delete", item: byName(memory, "MEMORY.md") }), r)).toEqual({
+    ...editsOnly([]),
+    removals: [join(dir, "MEMORY.md")],
+  })
+})
+
+test("plan throws for kinds other than memory", async () => {
+  await expect(claudeCode.plan({ ...memoryChange({ op: "create" }), kind: "mcp" }, roots())).rejects.toThrow(
+    "Claude Code: mcp changes are not supported yet",
+  )
+})
+
+test("memoryFiles and skillRoots", async () => {
+  expect(claudeCode.memoryFiles.local).toEqual(["CLAUDE.local.md"])
+  expect(await claudeCode.skillRoots(roots())).toEqual([
+    { path: join(home, ".claude/skills"), scope: "global" },
+    { path: join(project, ".claude/skills"), scope: "project" },
+  ])
 })

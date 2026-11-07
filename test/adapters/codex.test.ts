@@ -1,9 +1,9 @@
 import { beforeEach, expect, test } from "bun:test"
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { codex } from "../../src/adapters/codex"
-import type { Item, Kind, Roots } from "../../src/core/model"
+import type { Change, FileEdit, Item, Kind, Roots, WritePlan } from "../../src/core/model"
 
 const fixtures = join(import.meta.dir, "../fixtures/codex")
 let base: string
@@ -169,4 +169,64 @@ test("plugins named only in config are listed as not installed", async () => {
   const slack = (await byName("plugin"))["slack@official"]!
   expect(slack).toMatchObject({ path: join(codexHome, "config.toml"), loadedBy: [], warnings: ["not installed"] })
   expect(await codex.read(slack)).toEqual({ type: "plugin", plugin: { name: "slack@official", enabled: true, source: "official" } })
+})
+
+const memoryChange = (fields: Partial<Change> & Pick<Change, "op">): Change => ({
+  kind: "memory",
+  target: { harness: "codex", scope: "project" },
+  ...fields,
+})
+const editsOnly = (edits: FileEdit[]): WritePlan => ({ edits, moves: [], copies: [], removals: [], commands: [], notices: [] })
+
+test("plan creates AGENTS files under the Codex home and the git root", async () => {
+  rmSync(join(codexHome, "AGENTS.md"))
+  const global = memoryChange({ op: "create", target: { harness: "codex", scope: "global" }, name: "AGENTS.md", text: "Hi\n" })
+  expect(await codex.plan(global, roots)).toEqual(editsOnly([{ path: join(codexHome, "AGENTS.md"), before: null, after: "Hi\n" }]))
+  expect(await codex.plan(memoryChange({ op: "create", name: "AGENTS.override.md" }), roots)).toEqual(
+    editsOnly([{ path: join(project, "AGENTS.override.md"), before: null, after: "" }]),
+  )
+})
+
+test("plan refuses a name outside memoryFiles and a file that exists", async () => {
+  await expect(codex.plan(memoryChange({ op: "create", name: "TEAM.md" }), roots)).rejects.toThrow("TEAM.md")
+  await expect(codex.plan(memoryChange({ op: "create", name: "AGENTS.md" }), roots)).rejects.toThrow("already exists")
+})
+
+test("plan updates and deletes a memory file", async () => {
+  const agents = (await byName("memory"))["AGENTS.md"]!
+  const target = (await codex.list("memory", roots)).find((item) => item.path === join(project, "AGENTS.md"))!
+  expect(await codex.plan(memoryChange({ op: "update", item: target, text: "New\n" }), roots)).toEqual(
+    editsOnly([{ path: target.path, before: readFileSync(target.path, "utf8"), after: "New\n" }]),
+  )
+  expect(await codex.plan(memoryChange({ op: "delete", item: agents }), roots)).toEqual({ ...editsOnly([]), removals: [agents.path] })
+})
+
+test("plan refuses to update or delete a read-only item", async () => {
+  const locked: Item = { ...(await byName("memory"))["AGENTS.md"]!, readOnly: "imported from Claude Code" }
+  await expect(codex.plan(memoryChange({ op: "update", item: locked, text: "x" }), roots)).rejects.toThrow("imported from Claude Code")
+  await expect(codex.plan(memoryChange({ op: "delete", item: locked }), roots)).rejects.toThrow("imported from Claude Code")
+})
+
+test("a generated memory can be deleted but not updated", async () => {
+  const generated = (await byName("memory"))["summary.md"]!
+  await expect(codex.plan(memoryChange({ op: "update", item: generated, text: "x" }), roots)).rejects.toThrow(
+    "Codex: generated memories can only be read or deleted",
+  )
+  expect(await codex.plan(memoryChange({ op: "delete", item: generated }), roots)).toEqual({ ...editsOnly([]), removals: [generated.path] })
+})
+
+test("plan throws for kinds other than memory", async () => {
+  await expect(codex.plan({ ...memoryChange({ op: "create" }), kind: "skill" }, roots)).rejects.toThrow(
+    "Codex: skill changes are not supported yet",
+  )
+})
+
+test("memoryFiles and skillRoots", async () => {
+  expect(codex.memoryFiles).toEqual({ global: ["AGENTS.md", "AGENTS.override.md"], project: ["AGENTS.md", "AGENTS.override.md"] })
+  expect(await codex.skillRoots(roots)).toEqual([
+    { path: join(home, ".agents/skills"), scope: "global" },
+    { path: join(codexHome, "skills"), scope: "global" },
+    { path: join(project, "sub/.agents/skills"), scope: "project" },
+    { path: join(project, ".agents/skills"), scope: "project" },
+  ])
 })
