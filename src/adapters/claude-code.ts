@@ -143,6 +143,7 @@ async function readServer(item: Item): Promise<McpServer> {
 
 interface PluginRecord {
   id: string
+  index: number // position in installed_plugins.json plugins[id]
   scope: Scope
   installPath: string
   version?: string
@@ -157,8 +158,9 @@ async function installedPlugins(roots: Roots): Promise<PluginRecord[]> {
   const plugins = (await readJson(installedPluginsPath(roots)))?.plugins ?? {}
   return Object.entries(plugins as Record<string, Json[]>).flatMap(([id, records]) =>
     records
-      .filter((record) => PLUGIN_SCOPES[record.scope] && (record.scope === "user" || record.projectPath === roots.project))
-      .map((record) => ({ id, scope: PLUGIN_SCOPES[record.scope]!, installPath: record.installPath, version: record.version })),
+      .map((record, index) => ({ record, index }))
+      .filter(({ record }) => PLUGIN_SCOPES[record.scope] && (record.scope === "user" || record.projectPath === roots.project))
+      .map(({ record, index }) => ({ id, index, scope: PLUGIN_SCOPES[record.scope]!, installPath: record.installPath, version: record.version })),
   )
 }
 
@@ -183,13 +185,13 @@ async function listPlugins(roots: Roots): Promise<Item[]> {
   const enabled: Json = Object.assign({}, ...settings.map((file) => file?.enabledPlugins))
   const path = installedPluginsPath(roots)
   return (await installedPlugins(roots)).map((plugin) =>
-    item("plugin", plugin.scope, plugin.id, path, { key: plugin.id, ...(enabled[plugin.id] !== true && OFF) }),
+    item("plugin", plugin.scope, plugin.id, path, { key: `plugins["${plugin.id}"][${plugin.index}]`, ...(enabled[plugin.id] !== true && OFF) }),
   )
 }
 
 async function readPlugin(item: Item) {
   const records = ((await readJson(item.path))?.plugins?.[item.name] ?? []) as Json[]
-  const record = records.find((candidate) => PLUGIN_SCOPES[candidate.scope] === item.scope)
+  const record = records[Number(/\[(\d+)\]$/.exec(item.key ?? "")?.[1])] // the key names the record's index
   const source = item.name.slice(item.name.lastIndexOf("@") + 1)
   return { name: item.name, enabled: !item.offIn?.includes(ID), version: record?.version, source }
 }

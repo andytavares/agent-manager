@@ -1,6 +1,6 @@
 import { useKeyboard } from "@opentui/react"
 import { createTwoFilesPatch } from "diff"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { applyPlan, StaleFileError } from "../core/apply"
 import type { FileEdit, WritePlan } from "../core/model"
 import { ACCENT, DIM, tildePath } from "./ItemList"
@@ -18,13 +18,18 @@ interface ReviewChangesProps {
 export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBack }: ReviewChangesProps) {
   const [error, setError] = useState("")
   const [revealed, setRevealed] = useState(false)
+  const applying = useRef(false) // a second enter while the first apply runs must not run the plan again
   useKeyboard((key) => {
-    if (key.name === "escape") onBack()
+    if (key.name === "escape" && !applying.current) onBack()
     if (key.name === "r") setRevealed(!revealed)
-    if (key.name !== "return") return
+    if (key.name !== "return" || applying.current) return
+    applying.current = true
     applyPlan(plan, { backupRoot }).then(
       ({ backupDir, notices }) => onApplied([`Saved. Backup › ${tildePath(backupDir, home)}`, ...notices].join("  ")),
-      (failure: Error) => setError(failureMessage(failure)),
+      (failure: Error) => {
+        applying.current = false
+        setError(failureMessage(failure))
+      },
     )
   })
   const path = (value: string) => tildePath(value, home)
@@ -41,6 +46,7 @@ export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBa
       {plan.copies.map(({ from, to }) => <Line key={from} label="copy" text={`${path(from)} → ${path(to)}`} />)}
       {plan.removals.map((removal) => <Line key={removal} label="moved to backup" text={path(removal)} />)}
       {plan.commands.map(({ argv }) => <Line key={argv.join(" ")} label="run command" text={mask(argv.join(" "))} />)}
+      {plan.notices.map((notice) => <Line key={notice} label="note" text={notice} />)}
       <Line label="Backup ›" text={`${path(backupRoot)}/…`} />
       {error && <text fg="#ff5f5f">{error}</text>}
     </box>
@@ -56,8 +62,10 @@ function changeCount(plan: WritePlan): number {
   return plan.edits.length + plan.moves.length + plan.copies.length + plan.removals.length + plan.commands.length
 }
 
+// Masks a secret only where it stands as a quoted value, so short values such as "1" elsewhere stay readable.
 function hideSecrets(text: string, secrets: string[]): string {
-  return secrets.reduce((masked, secret) => masked.replaceAll(secret, "••••••••"), text)
+  const masked = secrets.filter((secret) => secret.length >= 4)
+  return masked.reduce((result, secret) => result.replaceAll(`"${secret}"`, '"••••••••"'), text)
 }
 
 function EditDiff({ edit, home, mask }: { edit: FileEdit; home: string; mask: (text: string) => string }) {

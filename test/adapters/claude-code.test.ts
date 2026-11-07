@@ -167,10 +167,10 @@ test("plugin enabled state follows local > project > user settings", async () =>
   const items = await list("plugin")
   const state = Object.fromEntries(items.map((i) => [i.name, [i.scope, i.key, i.offIn ?? []]]))
   expect(state).toEqual({
-    "alpha@mkt": ["global", "alpha@mkt", []],
-    "beta@mkt": ["global", "beta@mkt", ["claude-code"]],
-    "gamma@mkt": ["project", "gamma@mkt", []],
-    "delta@mkt": ["local", "delta@mkt", ["claude-code"]],
+    "alpha@mkt": ["global", "plugins[\"alpha@mkt\"][0]", []],
+    "beta@mkt": ["global", "plugins[\"beta@mkt\"][0]", ["claude-code"]],
+    "gamma@mkt": ["project", "plugins[\"gamma@mkt\"][0]", []],
+    "delta@mkt": ["local", "plugins[\"delta@mkt\"][0]", ["claude-code"]],
   })
 })
 
@@ -491,4 +491,23 @@ test("a project create refuses a name that .mcp.json already holds", async () =>
   await expect(claudeCode.plan(mcpChange("project", { op: "create", server: stdioServer({ name: "files" }) }), roots())).rejects.toThrow(
     "Claude Code: files already exists in",
   )
+})
+
+test("one plugin installed at user and project scope gives two items, each reading its own record", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-plugins-"))
+  const projectDir = join(dir, "repo")
+  mkdirSync(join(dir, ".claude/plugins"), { recursive: true })
+  const records = [
+    { scope: "project", projectPath: "/other/repo", version: "9.9.9" },
+    { scope: "user", version: "1.0.0" },
+    { scope: "project", projectPath: projectDir, version: "2.0.0" },
+  ]
+  writeFileSync(join(dir, ".claude/plugins/installed_plugins.json"), JSON.stringify({ version: 2, plugins: { "lint@team": records } }))
+  const items = await claudeCode.list("plugin", { home: dir, project: projectDir, env: {} })
+  expect(items.map((i) => [i.scope, i.key])).toEqual([
+    ["global", 'plugins["lint@team"][1]'],
+    ["project", 'plugins["lint@team"][2]'],
+  ])
+  const versions = await Promise.all(items.map(async (i) => ((await claudeCode.read(i)) as { plugin: { version?: string } }).plugin.version))
+  expect(versions).toEqual(["1.0.0", "2.0.0"])
 })

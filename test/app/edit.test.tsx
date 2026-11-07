@@ -124,7 +124,8 @@ test("enter on review writes the file through applyPlan and shows the backup and
   try {
     await editAndSave(setup)
     setup.mockInput.pressEnter()
-    const frame = await waitForText(setup, "Restart Claude Code sessions")
+    const frame = await waitForText(setup, "Saved.")
+    expect(frame).toContain("Restart Claude Code sessions")
     expect(readFileSync(memoryPath, "utf8")).toBe("Use tabs. Be brief.\n")
     expect(frame).toContain("backups")
     expect(frame).toContain("a add")
