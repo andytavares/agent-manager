@@ -1,0 +1,26 @@
+test/adapters/codex.test.ts
+  s_b67d2564e0abf8::t_ba3fbda53fcad5 420-425
+test/adapters/opencode.test.ts
+  s_b67d2564e0abf8::t_1d46c302a5dde6 376,379,382
+src/adapters/opencode.ts
+  s_b67d2564e0abf8::t_1d46c302a5dde6 330-332
+src/adapters/codex.ts
+  s_b67d2564e0abf8::t_ba3fbda53fcad5 339,343
+  s_b67d2564e0abf8::t_a63a0339301d22 7,340-342
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1c98335d5d61106f6dd8fc297a21666aac01e211",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
