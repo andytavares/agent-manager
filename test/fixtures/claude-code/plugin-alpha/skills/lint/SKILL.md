@@ -1,0 +1,4 @@
+---
+name: lint
+---
+Lint skill

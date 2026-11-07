@@ -1,0 +1,1 @@
+{ "name": "omp-plugins", "private": true, "dependencies": { "omp-lint": "^1.2.0", "omp-off": "2.0.0", "omp-masked": "1.0.0" } }

@@ -1,0 +1,4 @@
+{
+  // user settings
+  "enabledPlugins": { "alpha@mkt": true, "beta@mkt": true, "gamma@mkt": true }
+}

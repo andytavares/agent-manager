@@ -1,0 +1,3 @@
+{
+  "mcp": { "docs": { "type": "remote", "url": "https://project-docs.example/mcp", } },
+}

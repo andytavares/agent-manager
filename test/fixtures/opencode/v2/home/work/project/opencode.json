@@ -1,0 +1,1 @@
+{ "mcp": { "servers": { "linear": { "type": "remote", "url": "https://project.example/mcp" } } } }

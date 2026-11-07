@@ -1,0 +1,8 @@
+{
+  // global v1 config
+  "mcp": {
+    "github": { "type": "local", "command": ["gh-mcp", "--stdio"], "environment": { "TOKEN": "{env:GH_TOKEN}" }, "enabled": false },
+    "docs": { "type": "remote", "url": "https://docs.example/mcp" }
+  },
+  "plugin": ["oc-v1-plugin"]
+}

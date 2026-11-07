@@ -1,0 +1,1 @@
+{ "version": 2, "plugins": { "docs@team": [ { "scope": "project", "installPath": "/cache/docs", "version": "0.3.0" } ] } }

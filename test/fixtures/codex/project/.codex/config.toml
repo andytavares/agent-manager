@@ -1,0 +1,6 @@
+# Synthetic Codex project config; read only when the project is trusted.
+[mcp_servers.repo]
+command = "./bin/mcp"
+
+[plugins."github@official"]
+enabled = false # project wins over global

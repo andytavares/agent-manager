@@ -1,0 +1,11 @@
+{
+  // global v2 config
+  "mcp": {
+    "servers": {
+      "linear": { "type": "remote", "url": "https://mcp.linear.app/sse", "headers": { "Authorization": "Bearer {env:LINEAR_TOKEN}" } },
+      "fs": { "type": "local", "command": ["npx", "-y", "fs-mcp"], "environment": { "ROOT": "{env:HOME}/code" }, "disabled": true, "timeout": 5000 }
+    }
+  },
+  "plugins": ["opencode-wakatime@1.2.0", { "package": "@acme/oc-tools", "options": { "level": 2 } }, "-oc-off"],
+  "instructions": ["rules/*.md", "https://example.com/rules.md", "~/notes.md"]
+}
