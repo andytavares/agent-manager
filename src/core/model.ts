@@ -64,13 +64,15 @@ export interface HarnessAdapter {
   detect(roots: Roots): Promise<boolean>
   list(kind: Kind, roots: Roots): Promise<Item[]>
   read(item: Item): Promise<ItemDetail>
-  // Builds the write plan for a memory or MCP change (later: plugin). Skills are planned in src/core/skills.ts.
+  // Builds the write plan for a memory, MCP or plugin change. Skills are planned in src/core/skills.ts.
   // Throws an Error with a user-facing message when the change is not allowed.
   plan(change: Change, roots: Roots): Promise<WritePlan>
   // Memory file names a user can create per scope, relative to that scope's root; "<name>" is filled in by the user.
   memoryFiles: Partial<Record<Scope, string[]>>
   // Skill roots this harness reads, in its own precedence order.
   skillRoots(roots: Roots): Promise<{ path: string; scope: Scope }[]>
+  // Marketplaces this harness knows, for the plugin install screen; absent when it has none.
+  marketplaces?(roots: Roots): Promise<{ name: string; source: string }[]>
   // MCP sources of other harnesses this harness imports (omp); the registry adds it to their loadedBy.
   importsMcpFrom?(roots: Roots): Promise<{ harness: HarnessId; scope: Scope }[]>
 }
@@ -84,7 +86,9 @@ export interface Change {
   text?: string // full new text: memory file or SKILL.md
   destination?: string // move, copy: destination skill root
   server?: McpServer // mcp create, update; on delete only for masking secrets in review
-  plugin?: PluginInfo // plugin changes
+  // plugin: create = install, delete = uninstall, update = enable/disable when plugin.enabled changes, else version update
+  plugin?: PluginInfo
+  marketplace?: string // plugin create/delete with no plugin: add or remove this marketplace source or name
 }
 
 // A change as files and commands. Adapters build it; only src/core/apply.ts carries it out.
