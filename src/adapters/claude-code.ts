@@ -2,7 +2,7 @@ import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
 import { isDeepStrictEqual } from "node:util"
-import { applyEdits, modify, parse, type JSONPath, type ParseError } from "jsonc-parser"
+import { parse, type ParseError } from "jsonc-parser"
 import {
   HARNESS_LABELS,
   type Change,
@@ -15,6 +15,7 @@ import {
   type Scope,
   type WritePlan,
 } from "../core/model"
+import { setJsonc } from "../core/json-edit"
 import { emptyPlan, memoryPattern, planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders, parseFrontmatter } from "../core/skills"
 
@@ -235,12 +236,6 @@ async function planAutoDelete(item: Item, autoDir: string): Promise<WritePlan> {
 }
 
 const RESTART_NOTICE = "Restart Claude Code sessions to load this change."
-const JSON_FORMAT = { formattingOptions: { insertSpaces: true, tabSize: 2 } }
-
-// value undefined removes the key; the rest of the text keeps its formatting.
-function setJson(text: string, path: JSONPath, value: unknown): string {
-  return applyEdits(text, modify(text, path, value, JSON_FORMAT))
-}
 
 // native goes first so harness-only keys survive but never override type, command or url.
 function serverEntry({ transport, command, args, env, url, headers, native }: McpServer): Json {
@@ -261,12 +256,12 @@ async function planCliMcp(change: Change, roots: Roots): Promise<WritePlan> {
   const plan = emptyPlan()
   if (op !== "create") {
     plan.commands.push(command("remove", "-s", cliScope, item!.name))
-    after = setJson(after, [...serversPath, item!.name], undefined)
+    after = setJsonc(after, [...serversPath, item!.name], undefined)
   }
   if (op !== "delete") {
     const entry = serverEntry(server!)
     plan.commands.push(command("add-json", "-s", cliScope, server!.name, JSON.stringify(entry)))
-    after = setJson(after, [...serversPath, server!.name], entry)
+    after = setJsonc(after, [...serversPath, server!.name], entry)
   }
   plan.edits.push({ path: claudeJson, before, after, previewOnly: true })
   return plan
@@ -281,7 +276,7 @@ async function planDisabledList(roots: Roots, name: string, enabled: boolean): P
       const list: string[] = parse(before ?? "{}")?.disabledMcpjsonServers ?? []
       if (enabled !== list.includes(name)) return undefined
       const next = enabled ? list.filter((entry) => entry !== name) : [...list, name]
-      return { path, before, after: setJson(before ?? "{}", ["disabledMcpjsonServers"], next) }
+      return { path, before, after: setJsonc(before ?? "{}", ["disabledMcpjsonServers"], next) }
     }),
   )
   return edits.filter((edit) => edit !== undefined)
@@ -296,8 +291,8 @@ async function planProjectMcp(change: Change, roots: Roots): Promise<WritePlan> 
   if ((op === "create" || renamed) && parse(after)?.mcpServers?.[server!.name]) throw new Error(`${LABEL}: ${server!.name} already exists in ${path}`)
   const unchanged =
     op === "update" && item!.name === server!.name && isDeepStrictEqual(serverEntry(await readServer(item!)), serverEntry(server!))
-  if (op === "delete" || renamed) after = setJson(after, ["mcpServers", item!.name], undefined)
-  if (op !== "delete" && !unchanged) after = setJson(after, ["mcpServers", server!.name], serverEntry(server!))
+  if (op === "delete" || renamed) after = setJsonc(after, ["mcpServers", item!.name], undefined)
+  if (op !== "delete" && !unchanged) after = setJsonc(after, ["mcpServers", server!.name], serverEntry(server!))
   const plan = emptyPlan()
   if (after !== before) plan.edits.push({ path, before, after })
   const wasEnabled = op === "create" || !item!.offIn?.includes(ID)

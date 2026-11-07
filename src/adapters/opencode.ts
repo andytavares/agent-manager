@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { basename, dirname, join, resolve } from "node:path"
-import { applyEdits, modify, parse, type JSONPath, type ParseError } from "jsonc-parser"
+import { parse, type JSONPath, type ParseError } from "jsonc-parser"
 import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, PluginInfo, Roots, Scope, WritePlan } from "../core/model"
 import { emptyPlan, planMemoryFile } from "../core/memory-plan"
+import { setJsonc } from "../core/json-edit"
 import { listSkillFolders } from "../core/skills"
 
 type Shape = "v1" | "v2" | "unknown"
@@ -187,8 +188,6 @@ function toEntry(server: McpServer, shape: "v1" | "v2"): Config {
 }
 
 const mcpPath = (shape: "v1" | "v2", name: string): JSONPath => (shape === "v1" ? ["mcp", name] : ["mcp", "servers", name])
-const FORMAT = { formattingOptions: { tabSize: 2, insertSpaces: true } }
-const setJsonc = (text: string, path: JSONPath, value: unknown) => applyEdits(text, modify(text, path, value, FORMAT))
 
 // Global files sit in the config dir, project files in the project root; .jsonc wins over .json, else a new .json.
 function createTarget(scope: Scope, roots: Roots): string {

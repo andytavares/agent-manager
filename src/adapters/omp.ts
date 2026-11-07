@@ -1,10 +1,11 @@
 import { existsSync, readdirSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import { basename, dirname, join, parse as parsePath, relative } from "node:path"
-import { applyEdits, modify, parse as parseJsonc, type JSONPath, type ParseError } from "jsonc-parser"
+import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import { parse as parseYaml } from "yaml"
 import type { Change, HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
 import { emptyPlan, planMemoryFile } from "../core/memory-plan"
+import { setJsonc } from "../core/json-edit"
 import { listSkillFolders } from "../core/skills"
 
 // omp (oh-my-pi). Paths and rules: https://github.com/can1357/oh-my-pi/tree/main/docs
@@ -319,8 +320,6 @@ function toEntry(server: McpServer): Record<string, unknown> {
   return JSON.parse(JSON.stringify(entry)) // drops undefined fields
 }
 
-const FORMAT = { formattingOptions: { tabSize: 2, insertSpaces: true } }
-const setJsonc = (text: string, path: JSONPath, value: unknown) => applyEdits(text, modify(text, path, value, FORMAT))
 const hasEnvRef = (server: McpServer) => Object.values({ ...server.env, ...server.headers }).some((value) => value.includes("${"))
 
 async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
