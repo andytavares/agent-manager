@@ -1,6 +1,6 @@
 import { dirname } from "node:path"
 import { stringify } from "yaml"
-import { HARNESS_LABELS, type Change, type HarnessAdapter, type Item, type McpServer, type Roots, type Scope, type WritePlan } from "../core/model"
+import { HARNESS_LABELS, type Change, type HarnessAdapter, type HarnessId, type Item, type McpServer, type PluginInfo, type Roots, type Scope, type WritePlan } from "../core/model"
 import { skillRootChoices } from "../core/registry"
 import { tildePath } from "./ItemList"
 import type { McpTarget } from "./McpForm"
@@ -12,6 +12,13 @@ export type Screen =
   | { name: "editor"; title: string; initialText: string; toChange: (text: string) => Change }
   | { name: "mcpForm"; title: string; server: McpServer; targets: McpTarget[]; fixed?: boolean; toChanges: (server: McpServer, targets: McpTarget[]) => Change[] }
   | { name: "review"; plan: WritePlan; secrets: string[] } // secrets: literal values masked until revealed
+  | { name: "marketplaces"; marketplaces: Marketplace[] }
+
+export interface Marketplace {
+  harness: HarnessId
+  name: string
+  source: string
+}
 
 export interface FlowContext {
   adapters: HarnessAdapter[] // detected adapters only
@@ -106,9 +113,14 @@ async function readServer(item: Item, context: FlowContext): Promise<McpServer> 
   return detail.server
 }
 
+// The view's scope when the harness has it, else the harness's first scope.
+function viewScope(adapter: HarnessAdapter, scope: Scope): Scope {
+  return adapter.scopes.includes(scope) ? scope : adapter.scopes[0]!
+}
+
 // Unchecked, at the view's scope when the harness has it.
 function mcpTargets(adapters: HarnessAdapter[], scope: Scope): McpTarget[] {
-  return adapters.map((adapter) => ({ harness: adapter.id, scope: adapter.scopes.includes(scope) ? scope : adapter.scopes[0]!, checked: false }))
+  return adapters.map((adapter) => ({ harness: adapter.id, scope: viewScope(adapter, scope), checked: false }))
 }
 
 function createChanges(server: McpServer, targets: McpTarget[]): Change[] {
@@ -153,5 +165,79 @@ const MCP_ITEM_ACTIONS: Record<string, (item: Item, context: FlowContext) => Pro
 export function runMcpAction(name: string, item: Item | undefined, context: FlowContext): Screen | Promise<Screen | void> | undefined {
   if (name === "a") return addMcp(context)
   const action = MCP_ITEM_ACTIONS[name]
+  return item && action ? action(item, context) : undefined
+}
+
+async function readPlugin(item: Item, context: FlowContext): Promise<PluginInfo> {
+  const detail = await context.adapters.find((adapter) => adapter.id === item.harness)!.read(item)
+  if (detail.type !== "plugin") throw new Error(`${item.name} is not a plugin.`)
+  return detail.plugin
+}
+
+function harnessOptions(adapters: HarnessAdapter[]) {
+  return adapters.map((adapter) => ({ name: adapter.label, description: "", value: adapter.id }))
+}
+
+// Without a catalog the name is free text; known marketplace names are shown as a hint.
+async function installPlugin(context: FlowContext): Promise<Screen> {
+  const adapterOf = (id: string) => context.adapters.find((adapter) => adapter.id === id)!
+  const hints = new Map<string, string>()
+  for (const adapter of context.adapters) {
+    const names = (await adapter.marketplaces?.(context.roots))?.map((marketplace) => marketplace.name) ?? []
+    hints.set(adapter.id, names.length ? `  (marketplaces: ${names.join(", ")})` : "")
+  }
+  const nextStep = ([harness, scope, name]: string[]): PromptStep | null => {
+    if (!harness) return { label: "Harness", options: harnessOptions(context.adapters) }
+    if (!scope) return { label: "Scope", options: adapterOf(harness).scopes.map((value) => ({ name: value, description: "", value })) }
+    return name ? null : { label: `Plugin name${hints.get(harness)}` }
+  }
+  const onDone = ([harness, scope, name]: string[]) =>
+    context.review({ kind: "plugin", op: "create", target: { harness: harness as HarnessId, scope: scope as Scope }, plugin: { name: name!, enabled: true } })
+  return { name: "prompt", title: "Install plugin", nextStep, onDone }
+}
+
+async function marketplaceList(context: FlowContext): Promise<Screen> {
+  const lists = await Promise.all(
+    context.adapters.map(async (adapter) => ((await adapter.marketplaces?.(context.roots)) ?? []).map((entry) => ({ ...entry, harness: adapter.id }))),
+  )
+  return { name: "marketplaces", marketplaces: lists.flat() }
+}
+
+function marketplaceTarget(harness: HarnessId, context: FlowContext) {
+  return { harness, scope: viewScope(context.adapters.find((adapter) => adapter.id === harness)!, context.scope) }
+}
+
+export function addMarketplace(context: FlowContext): Screen {
+  const adapters = context.adapters.filter((adapter) => adapter.marketplaces)
+  const nextStep = ([harness, source]: string[]): PromptStep | null => {
+    if (!harness) return { label: "Harness", options: harnessOptions(adapters) }
+    return source ? null : { label: "Source (owner/repo, git URL or path)" }
+  }
+  const onDone = ([harness, source]: string[]) =>
+    context.review({ kind: "plugin", op: "create", target: marketplaceTarget(harness as HarnessId, context), marketplace: source })
+  return { name: "prompt", title: "Add marketplace", nextStep, onDone }
+}
+
+export function removeMarketplace(marketplace: Marketplace, context: FlowContext): void {
+  context.review({ kind: "plugin", op: "delete", target: marketplaceTarget(marketplace.harness, context), marketplace: marketplace.name })
+}
+
+// flip turns the plugin on or off; otherwise enabled stays and adapters plan a version update.
+async function updatePlugin(item: Item, context: FlowContext, flip: boolean): Promise<void> {
+  const plugin = await readPlugin(item, context)
+  context.review({ kind: "plugin", op: "update", target: target(item), item, plugin: { ...plugin, enabled: flip ? !plugin.enabled : plugin.enabled } })
+}
+
+const PLUGIN_ITEM_ACTIONS: Record<string, (item: Item, context: FlowContext) => Promise<Screen | void>> = {
+  space: (item, context) => updatePlugin(item, context, true),
+  u: (item, context) => updatePlugin(item, context, false),
+  x: async (item, context) => deleteItem(item, context),
+}
+
+// Plugin keys on the list; undefined when the key is not an action.
+export function runPluginAction(name: string, item: Item | undefined, context: FlowContext): Promise<Screen | void> | undefined {
+  if (name === "i") return installPlugin(context)
+  if (name === "m") return marketplaceList(context)
+  const action = PLUGIN_ITEM_ACTIONS[name]
   return item && action ? action(item, context) : undefined
 }

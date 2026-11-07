@@ -4,8 +4,9 @@ import { defaultBackupRoot } from "../core/apply"
 import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
-import { addMemory, deleteItem, editItem, type FlowContext, newSkill, relocateSkill, runMcpAction, type Screen } from "./flows"
+import { addMarketplace, addMemory, deleteItem, editItem, type FlowContext, type Marketplace, newSkill, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
 import { ACCENT, DIM, ItemList, SELECTED_BG, tildePath } from "./ItemList"
+import { Marketplaces } from "./Marketplaces"
 import { McpForm, type McpTarget } from "./McpForm"
 import { Prompt } from "./Prompt"
 import { ReviewChanges } from "./ReviewChanges"
@@ -23,11 +24,12 @@ const STATUS: Record<string, string> = {
   memory: `a add  e/enter edit  d delete  ${LIST_KEYS}`,
   skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}`,
   mcp: `a add  e edit  c copy to…  d delete  space on/off  ${LIST_KEYS}`,
-  plugin: LIST_KEYS,
+  plugin: "i install  space on/off  u update  x uninstall  m marketplaces  s scope",
   prompt: "↑↓ choose  enter next  esc cancel",
   editor: "ctrl+s review & save  esc discard",
   mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel",
   review: "enter apply  esc back",
+  marketplaces: "a add  d remove  esc back",
 }
 
 interface AppProps {
@@ -134,8 +136,8 @@ interface ActionTarget {
 
 // List keys of each kind; returns false when the key is not an action.
 function runAction(name: string, { kind, item, context, start }: ActionTarget): boolean {
-  if (kind === "mcp") {
-    const next = runMcpAction(name, item, context)
+  if (kind === "mcp" || kind === "plugin") {
+    const next = (kind === "mcp" ? runMcpAction : runPluginAction)(name, item, context)
     if (next) start(next)
     return Boolean(next)
   }
@@ -167,6 +169,11 @@ function ActiveScreen({ screen, context, backupRoot, onApplied }: ActiveScreenPr
     const submit = (server: McpServer, targets: McpTarget[]) => context.review(...screen.toChanges(server, targets))
     const { title, server, targets, fixed } = screen
     return <McpForm title={title} server={server} targets={targets} adapters={context.adapters} fixed={fixed} onSubmit={submit} onCancel={back} />
+  }
+  if (screen.name === "marketplaces") {
+    const add = () => context.open(addMarketplace(context))
+    const remove = (marketplace: Marketplace) => removeMarketplace(marketplace, context)
+    return <Marketplaces marketplaces={screen.marketplaces} onAdd={add} onRemove={remove} onBack={back} />
   }
   return <ReviewChanges plan={screen.plan} secrets={screen.secrets} backupRoot={backupRoot} home={context.roots.home} onApplied={onApplied} onBack={back} />
 }

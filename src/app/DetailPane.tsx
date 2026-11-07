@@ -58,6 +58,9 @@ function DetailBody({ detail }: { detail: ItemDetail }) {
       <Field label="state" value={plugin.enabled ? "on" : "off"} />
       {plugin.version && <Field label="version" value={plugin.version} />}
       {plugin.source && <Field label="source" value={plugin.source} />}
+      <text> </text>
+      <text fg={DIM}>{`space ${plugin.enabled ? "disable" : "enable"}`}</text>
+      <text fg={DIM}>u update  x uninstall</text>
     </box>
   )
 }
