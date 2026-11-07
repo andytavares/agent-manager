@@ -1,0 +1,4 @@
+{
+  // .opencode overrides direct files
+  "mcp": { "servers": { "linear": { "type": "remote", "url": "https://dot.example/mcp" } } }
+}
