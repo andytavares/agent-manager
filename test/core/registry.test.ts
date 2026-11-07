@@ -1,13 +1,19 @@
 import { expect, test } from "bun:test"
-import type { HarnessAdapter, HarnessId, Item, Kind, Roots, Scope } from "../../src/core/model"
-import { listItems, maskSecret } from "../../src/core/registry"
+import { EMPTY_PLAN, fakeSkills } from "../app/fake-skills"
+import type { Change, HarnessAdapter, HarnessId, Item, Kind, Roots, Scope } from "../../src/core/model"
+
+const { listItems, maskSecret, planChange, skillRootChoices } = await import("../../src/core/registry")
 
 const roots: Roots = { home: "/home/u", project: "/home/u/repo", env: {} }
 
 function fakeAdapter(
   id: HarnessId,
   items: Item[],
-  options: { detected?: boolean; imports?: { harness: HarnessId; scope: Scope }[] } = {},
+  options: {
+    detected?: boolean
+    imports?: { harness: HarnessId; scope: Scope }[]
+    skillRoots?: { path: string; scope: Scope }[]
+  } = {},
 ): HarnessAdapter {
   return {
     id,
@@ -16,6 +22,9 @@ function fakeAdapter(
     detect: async () => options.detected ?? true,
     list: async (kind: Kind) => items.filter((item) => item.kind === kind),
     read: async () => ({ type: "text", text: "" }),
+    plan: async () => ({ ...EMPTY_PLAN, notices: [`planned by ${id}`] }),
+    memoryFiles: {},
+    skillRoots: async () => options.skillRoots ?? [],
     importsMcpFrom: options.imports ? async () => options.imports! : undefined,
   }
 }
@@ -106,4 +115,53 @@ test("maskSecret keeps env references and hides literal values", () => {
   expect(maskSecret("Bearer ${LINEAR_TOKEN}")).toBe("Bearer ${LINEAR_TOKEN}")
   expect(maskSecret("Bearer sk-live-123")).toBe("••••••••")
   expect(maskSecret("")).toBe("••••••••")
+})
+
+const agentsRoot = { path: "/home/u/.agents/skills", scope: "global" as const }
+const claudeRoot = { path: "/home/u/.claude/skills", scope: "global" as const }
+const projectRoot = { path: "/home/u/repo/.agents/skills", scope: "project" as const }
+const skillAdapters = [
+  fakeAdapter("claude-code", [], { skillRoots: [claudeRoot] }),
+  fakeAdapter("codex", [], { skillRoots: [agentsRoot, projectRoot] }),
+  fakeAdapter("opencode", [], { skillRoots: [claudeRoot, agentsRoot] }),
+]
+
+async function readersOf(change: Change): Promise<HarnessId[]> {
+  let seen: HarnessId[] = []
+  fakeSkills.planSkill = async (_, readers) => {
+    seen = readers
+    return EMPTY_PLAN
+  }
+  try {
+    await planChange(skillAdapters, change, roots)
+  } finally {
+    fakeSkills.planSkill = undefined
+  }
+  return seen
+}
+
+test("planChange plans a skill move for the harnesses that read the destination root", async () => {
+  const skill = item({ kind: "skill", harness: "codex", name: "pdf", path: "/home/u/.codex/skills/pdf" })
+  const target = { harness: "codex" as const, scope: "global" as const }
+  expect(await readersOf({ kind: "skill", op: "move", target, item: skill, destination: agentsRoot.path })).toEqual(["codex", "opencode"])
+  expect(await readersOf({ kind: "skill", op: "create", target, name: "pdf", destination: claudeRoot.path })).toEqual(["claude-code", "opencode"])
+})
+
+test("planChange plans a skill update or delete for the harnesses that read the item's root", async () => {
+  const skill = item({ kind: "skill", harness: "claude-code", name: "research", path: "/home/u/.claude/skills/research" })
+  const target = { harness: "claude-code" as const, scope: "global" as const }
+  expect(await readersOf({ kind: "skill", op: "delete", target, item: skill })).toEqual(["claude-code", "opencode"])
+})
+
+test("planChange sends other kinds to the adapter of the target harness", async () => {
+  const change: Change = { kind: "memory", op: "create", target: { harness: "codex", scope: "global" }, name: "AGENTS.md", text: "x" }
+  expect((await planChange(skillAdapters, change, roots)).notices).toEqual(["planned by codex"])
+})
+
+test("skillRootChoices lists each root of a scope once with the harnesses reading it", async () => {
+  expect(await skillRootChoices(skillAdapters, roots, "global")).toEqual([
+    { path: claudeRoot.path, readers: ["claude-code", "opencode"] },
+    { path: agentsRoot.path, readers: ["codex", "opencode"] },
+  ])
+  expect(await skillRootChoices(skillAdapters, roots, "project")).toEqual([{ path: projectRoot.path, readers: ["codex"] }])
 })

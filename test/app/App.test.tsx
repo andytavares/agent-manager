@@ -29,6 +29,9 @@ function fakeAdapter(id: HarnessId, label: string): HarnessAdapter {
     detect: async () => true,
     list: async (kind) => items.filter((item) => item.kind === kind && item.harness === id),
     read: async (item) => details[item.name] ?? { type: "text", text: `text of ${item.name}` },
+    plan: async () => ({ edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] }),
+    memoryFiles: {},
+    skillRoots: async () => [],
   }
 }
 

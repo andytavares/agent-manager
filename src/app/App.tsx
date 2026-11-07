@@ -1,57 +1,105 @@
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useReducer, useState } from "react"
+import { defaultBackupRoot } from "../core/apply"
 import type { HarnessAdapter, HarnessId, Item, Kind, Roots } from "../core/model"
-import { listItems } from "../core/registry"
+import { listItems, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
+import { addMemory, deleteItem, editItem, type FlowContext, newSkill, relocateSkill, type Screen } from "./flows"
 import { ACCENT, DIM, ItemList, SELECTED_BG, tildePath } from "./ItemList"
+import { Prompt } from "./Prompt"
+import { ReviewChanges } from "./ReviewChanges"
+import { TextEditor } from "./TextEditor"
 
 type ScopeView = "global" | "project" // project shows project and local items
 type Focus = "harness" | "list"
 
 const KIND_KEYS: Record<string, Kind> = { "1": "memory", "2": "mcp", "3": "skill", "4": "plugin" }
 const TAB_NAMES = ["1 Memory", "2 MCP", "3 Skills", "4 Plugins"]
+const LIST: Screen = { name: "list" }
+const NO_MESSAGE = { text: "", error: false }
+const LIST_KEYS = "1-4 kind  s scope  tab next pane  ↑↓ move  q quit"
+const STATUS: Record<string, string> = {
+  memory: `a add  e/enter edit  d delete  ${LIST_KEYS}`,
+  skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}`,
+  mcp: LIST_KEYS,
+  plugin: LIST_KEYS,
+  prompt: "↑↓ choose  enter next  esc cancel",
+  editor: "ctrl+s review & save  esc discard",
+  review: "enter apply  esc back",
+}
 
 interface AppProps {
   adapters: HarnessAdapter[]
   roots: Roots
+  backupRoot?: string
   onQuit: () => void
 }
 
-export function App({ adapters, roots, onQuit }: AppProps) {
+export function App({ adapters, roots, backupRoot = defaultBackupRoot(roots), onQuit }: AppProps) {
   const [view, dispatch] = useReducer(pressKey, START_VIEW)
+  const [screen, setScreen] = useState<Screen>(LIST)
+  const [message, setMessage] = useState(NO_MESSAGE)
+  const [reloads, setReloads] = useState(0)
   const detected = useDetected(adapters, roots)
-  const listing = useListing(adapters, roots, view.kind)
+  const listing = useListing(adapters, roots, view.kind, reloads)
   const { kind, scope, focus, harnessIndex } = view
   const inScope = listing.items.filter((item) => (scope === "global") === (item.scope === "global"))
   const harness = adapters[harnessIndex - 1]
   const visible = harness ? inScope.filter((item) => matchesHarness(item, harness.id)) : inScope
   const selected = Math.min(view.listIndex, visible.length - 1)
   const selectedItem = visible[selected]
+  const fail = (error: Error) => {
+    setMessage({ text: error.message, error: true })
+    setScreen(LIST)
+  }
+  const start = (next: Screen | Promise<Screen>) => Promise.resolve(next).then(setScreen, fail)
+  const context: FlowContext = {
+    adapters: adapters.filter((_, index) => detected[index]),
+    roots,
+    scope,
+    review: (change) => planChange(adapters, change, roots).then((plan) => setScreen({ name: "review", plan }), fail),
+    open: setScreen,
+  }
+  const onApplied = (text: string) => {
+    setMessage({ text, error: false })
+    setScreen(LIST)
+    setReloads((count) => count + 1)
+  }
   useKeyboard((key) => {
+    if (screen.name !== "list") return
+    setMessage(NO_MESSAGE)
     if (key.name === "q") onQuit()
-    else dispatch({ name: key.name, harnessCount: adapters.length, listLength: visible.length })
+    else if (!runAction(key.name, { kind, item: selectedItem, context, start }))
+      dispatch({ name: key.name, harnessCount: adapters.length, listLength: visible.length })
   })
 
   return (
     <box flexDirection="column" border width="100%" height="100%">
       <Header project={tildePath(roots.project, roots.home)} scope={scope} />
       <Tabs kind={kind} />
-      <box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
-        <box border width={22} overflow="hidden" borderColor={focus === "harness" ? ACCENT : undefined}>
-          <HarnessPane adapters={adapters} detected={detected} counts={countByHarness(adapters, inScope)} selected={harnessIndex} />
+      {screen.name !== "list" ? (
+        <box border flexGrow={1} flexShrink={1} overflow="hidden">
+          <ActiveScreen screen={screen} context={context} backupRoot={backupRoot} onApplied={onApplied} />
         </box>
-        <box border flexGrow={1} overflow="hidden" borderColor={focus === "list" ? ACCENT : undefined}>
-          {listing.error ? (
-            <text fg="#ff5f5f">{listing.error}</text>
-          ) : (
-            <ItemList kind={kind} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} />
-          )}
+      ) : (
+        <box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
+          <box border width={22} overflow="hidden" borderColor={focus === "harness" ? ACCENT : undefined}>
+            <HarnessPane adapters={adapters} detected={detected} counts={countByHarness(adapters, inScope)} selected={harnessIndex} />
+          </box>
+          <box border flexGrow={1} overflow="hidden" borderColor={focus === "list" ? ACCENT : undefined}>
+            {listing.error ? (
+              <text fg="#ff5f5f">{listing.error}</text>
+            ) : (
+              <ItemList kind={kind} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} />
+            )}
+          </box>
+          <box border width={36} overflow="hidden">
+            <DetailPane item={selectedItem} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
+          </box>
         </box>
-        <box border width={36} overflow="hidden">
-          <DetailPane item={selectedItem} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
-        </box>
-      </box>
-      <text flexShrink={0} fg={DIM}> 1-4 kind  s scope  tab next pane  ↑↓ move  q quit</text>
+      )}
+      {message.text && <text flexShrink={0} fg={message.error ? ERROR : ACCENT}>{` ${message.text}`}</text>}
+      <text flexShrink={0} fg={DIM}>{` ${STATUS[screen.name === "list" ? kind : screen.name]}`}</text>
     </box>
   )
 }
@@ -68,6 +116,44 @@ interface KeyPress {
   name: string
   harnessCount: number
   listLength: number
+}
+
+const ERROR = "#ff5f5f"
+
+interface ActionTarget {
+  kind: Kind
+  item: Item | undefined
+  context: FlowContext
+  start: (next: Screen | Promise<Screen>) => void
+}
+
+// Memory and skill keys on the list; returns false when the key is not an action.
+function runAction(name: string, { kind, item, context, start }: ActionTarget): boolean {
+  if (kind !== "memory" && kind !== "skill") return false
+  if (name === "a") start(kind === "memory" ? addMemory(context) : newSkill(context))
+  else if (!item) return false
+  else if (name === "e" || name === "return") start(editItem(item, context))
+  else if (name === "d") deleteItem(item, context)
+  else if (kind === "skill" && (name === "c" || name === "m")) start(relocateSkill(item, name === "c" ? "copy" : "move", context))
+  else return false
+  return true
+}
+
+interface ActiveScreenProps {
+  screen: Exclude<Screen, { name: "list" }>
+  context: FlowContext
+  backupRoot: string
+  onApplied: (message: string) => void
+}
+
+function ActiveScreen({ screen, context, backupRoot, onApplied }: ActiveScreenProps) {
+  const back = () => context.open(LIST)
+  if (screen.name === "prompt") return <Prompt title={screen.title} nextStep={screen.nextStep} onDone={screen.onDone} onCancel={back} />
+  if (screen.name === "editor") {
+    const save = (text: string) => context.review(screen.toChange(text))
+    return <TextEditor title={screen.title} initialText={screen.initialText} onSave={save} onCancel={back} />
+  }
+  return <ReviewChanges plan={screen.plan} backupRoot={backupRoot} home={context.roots.home} onApplied={onApplied} onBack={back} />
 }
 
 const START_VIEW: ViewState = { kind: "memory", scope: "global", focus: "list", harnessIndex: 0, listIndex: 0 }
@@ -97,7 +183,8 @@ function useDetected(adapters: HarnessAdapter[], roots: Roots): boolean[] {
   return detected
 }
 
-function useListing(adapters: HarnessAdapter[], roots: Roots, kind: Kind) {
+// reloads: bump to list again after a change is applied.
+function useListing(adapters: HarnessAdapter[], roots: Roots, kind: Kind, reloads: number) {
   const [listing, setListing] = useState({ items: [] as Item[], transports: new Map<Item, string>(), error: "" })
   useEffect(() => {
     let live = true
@@ -108,7 +195,7 @@ function useListing(adapters: HarnessAdapter[], roots: Roots, kind: Kind) {
     return () => {
       live = false
     }
-  }, [adapters, roots, kind])
+  }, [adapters, roots, kind, reloads])
   return listing
 }
 

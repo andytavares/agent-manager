@@ -1,4 +1,16 @@
-import { HARNESS_LABELS, type HarnessAdapter, type HarnessId, type Item, type Kind, type Roots } from "./model"
+import { dirname } from "node:path"
+import {
+  HARNESS_LABELS,
+  type Change,
+  type HarnessAdapter,
+  type HarnessId,
+  type Item,
+  type Kind,
+  type Roots,
+  type Scope,
+  type WritePlan,
+} from "./model"
+import { planSkill } from "./skills"
 
 const HARNESS_ORDER = Object.keys(HARNESS_LABELS) as HarnessId[]
 
@@ -40,6 +52,33 @@ async function addImporters(adapters: HarnessAdapter[], items: Item[], roots: Ro
       item.offIn = item.offIn?.filter((id) => id !== adapter.id)
     }
   }
+}
+
+export async function planChange(adapters: HarnessAdapter[], change: Change, roots: Roots): Promise<WritePlan> {
+  if (change.kind === "skill") {
+    const root = change.destination ?? dirname(change.item!.path)
+    const choice = (await skillRootChoices(adapters, roots)).find((candidate) => candidate.path === root)
+    return planSkill(change, choice?.readers ?? [])
+  }
+  const adapter = adapters.find((candidate) => candidate.id === change.target.harness)
+  if (!adapter) throw new Error(`${HARNESS_LABELS[change.target.harness]} is not available.`)
+  return adapter.plan(change, roots)
+}
+
+// Every skill root (of one scope, when given) with the harnesses that read it, in adapter order.
+export async function skillRootChoices(
+  adapters: HarnessAdapter[],
+  roots: Roots,
+  scope?: Scope,
+): Promise<{ path: string; readers: HarnessId[] }[]> {
+  const readersByRoot = new Map<string, HarnessId[]>()
+  for (const adapter of adapters) {
+    for (const root of await adapter.skillRoots(roots)) {
+      if (scope && root.scope !== scope) continue
+      readersByRoot.set(root.path, union(readersByRoot.get(root.path) ?? [], [adapter.id]))
+    }
+  }
+  return [...readersByRoot].map(([path, readers]) => ({ path, readers }))
 }
 
 function union<T>(left: T[], right: T[]): T[] {
