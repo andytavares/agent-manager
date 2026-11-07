@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
 import { join } from "node:path"
 import { configShape, opencode } from "../../src/adapters/opencode"
-import type { Item, Roots } from "../../src/core/model"
+import type { Change, Item, Roots, Scope } from "../../src/core/model"
 
 const fixtures = join(import.meta.dir, "../fixtures/opencode")
 
@@ -170,5 +170,65 @@ test("malformed JSONC gives no items and no crash", async () => {
   const broken = { home: join(fixtures, "v1-broken/home"), project: join(fixtures, "v1-broken/home/project"), env: {} }
   for (const kind of ["memory", "mcp", "skill", "plugin"] as const) {
     expect(await opencode.list(kind, broken)).toEqual([])
+  }
+})
+
+const memoryChange = (change: Partial<Change>): Change => ({ kind: "memory", op: "create", target: { harness: "opencode", scope: "project" }, ...change })
+const emptyPlan = { edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] }
+
+test("plan create: AGENTS.md at the scope root, with no file there yet", async () => {
+  const global = memoryChange({ target: { harness: "opencode", scope: "global" }, name: "AGENTS.md", text: "# rules\n" })
+  expect(await opencode.plan(global, v1)).toEqual({
+    ...emptyPlan,
+    edits: [{ path: join(v1.home, ".config/opencode/AGENTS.md"), before: null, after: "# rules\n" }],
+  })
+  expect((await opencode.plan(memoryChange({ name: "AGENTS.md" }), v1)).edits).toEqual([
+    { path: join(v1.project, "AGENTS.md"), before: null, after: "" },
+  ])
+})
+
+test("plan create refuses a name outside memoryFiles and an existing file", async () => {
+  await expect(opencode.plan(memoryChange({ name: "CLAUDE.md" }), v1)).rejects.toThrow("CLAUDE.md")
+  await expect(opencode.plan(memoryChange({ name: "../AGENTS.md" }), v1)).rejects.toThrow()
+  await expect(opencode.plan(memoryChange({ name: "AGENTS.md" }), v2)).rejects.toThrow("already exists")
+})
+
+test("plan update edits the item with its current text; delete removes it", async () => {
+  const [item] = await opencode.list("memory", v2)
+  expect(await opencode.plan(memoryChange({ op: "update", item, text: "# new\n" }), v2)).toEqual({
+    ...emptyPlan,
+    edits: [{ path: item!.path, before: "# global agents\n", after: "# new\n" }],
+  })
+  expect(await opencode.plan(memoryChange({ op: "delete", item }), v2)).toEqual({ ...emptyPlan, removals: [item!.path] })
+})
+
+test("plan refuses read-only items and kinds other than memory", async () => {
+  const [item] = await opencode.list("memory", v2)
+  const readOnly = { ...item!, readOnly: "imported from Codex" }
+  await expect(opencode.plan(memoryChange({ op: "update", item: readOnly, text: "x" }), v2)).rejects.toThrow("imported from Codex")
+  await expect(opencode.plan(memoryChange({ op: "delete", item: readOnly }), v2)).rejects.toThrow("imported from Codex")
+  await expect(opencode.plan(memoryChange({ kind: "mcp" }), v2)).rejects.toThrow("OpenCode: mcp changes are not supported yet")
+})
+
+test("memoryFiles names AGENTS.md for both scopes", () => {
+  expect(opencode.memoryFiles).toEqual({ global: ["AGENTS.md"], project: ["AGENTS.md"] })
+})
+
+test("skillRoots lists every scanned root; env opt-outs drop the .claude roots", async () => {
+  const config = join(v2.home, ".config/opencode")
+  const all: { path: string; scope: Scope }[] = [
+    { path: join(config, "skills"), scope: "global" },
+    { path: join(config, "skill"), scope: "global" },
+    { path: join(v2.home, ".claude/skills"), scope: "global" },
+    { path: join(v2.home, ".agents/skills"), scope: "global" },
+    { path: join(v2.project, ".opencode/skills"), scope: "project" },
+    { path: join(v2.project, ".opencode/skill"), scope: "project" },
+    { path: join(v2.project, ".claude/skills"), scope: "project" },
+    { path: join(v2.project, ".agents/skills"), scope: "project" },
+  ]
+  expect(await opencode.skillRoots(v2)).toEqual(all)
+  const withoutClaude = all.filter((root) => !root.path.includes(".claude"))
+  for (const name of ["OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"]) {
+    expect(await opencode.skillRoots(roots("v2", { [name]: "1" }))).toEqual(withoutClaude)
   }
 })

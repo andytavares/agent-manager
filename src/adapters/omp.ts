@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises"
 import { basename, dirname, join, parse as parsePath, relative } from "node:path"
 import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import { parse as parseYaml } from "yaml"
-import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope } from "../core/model"
+import type { Change, HarnessAdapter, HarnessId, Item, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
 import { listSkillFolders } from "../core/skills"
 
 // omp (oh-my-pi). Paths and rules: https://github.com/can1357/oh-my-pi/tree/main/docs
@@ -169,13 +169,51 @@ function memorySources(ctx: Context): Source[] {
   ]
 }
 
+// The local memory backend writes per-project files under <agentDir>/memories/<encoded cwd>/:
+// https://github.com/can1357/oh-my-pi/blob/f4c5a138c119364668fba67b7f4437faf56b4324/packages/coding-agent/src/memories/index.ts#L1407-L1409
+// https://github.com/can1357/oh-my-pi/blob/f4c5a138c119364668fba67b7f4437faf56b4324/packages/coding-agent/src/memories/index.ts#L1549-L1551
+// shortcut: ignores the $XDG_STATE_HOME/omp root omp uses after `omp config init-xdg`; add it when a user needs it.
+function backendMemoryItems(ctx: Context): Item[] {
+  const encoded = `--${ctx.roots.project.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`
+  const root = join(ctx.agentDir, "memories", encoded)
+  const allowed = asRecord(ctx.settings.memory).backend === "local"
+  return ["MEMORY.md", "memory_summary.md", "learned.md"]
+    .map((name) => join(root, name))
+    .filter((path) => existsSync(path))
+    .map((path) => ({
+      ...toItem(ctx, "memory", { scope: "project", path, provider: "native", level: "project", allowed, name: basename(path) }),
+      warnings: ["omp memory backend file"],
+    }))
+}
+
 function listMemory(ctx: Context): Item[] {
-  return memorySources(ctx)
+  const files = memorySources(ctx)
     .filter((source) => existsSync(source.path))
     .map((source) => {
       const name = source.scope === "global" ? basename(source.path) : relative(ctx.roots.project, source.path)
       return toItem(ctx, "memory", { ...source, name })
     })
+  return [...files, ...backendMemoryItems(ctx)]
+}
+
+const MEMORY_FILES: Partial<Record<Scope, string[]>> = { global: ["AGENTS.md", "RULES.md"], project: ["AGENTS.md", "RULES.md"] }
+
+async function planMemory(change: Change, roots: Roots): Promise<WritePlan> {
+  const plan: WritePlan = { edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] }
+  if (change.op === "create") {
+    const { scope } = change.target
+    if (!MEMORY_FILES[scope]?.includes(change.name ?? "")) throw new Error(`omp: cannot create ${change.name} in ${scope} scope`)
+    const path = join(scope === "global" ? agentDir(roots) : join(roots.project, ".omp"), change.name!)
+    if (existsSync(path)) throw new Error(`omp: ${path} already exists`)
+    plan.edits.push({ path, before: null, after: change.text ?? "" })
+    return plan
+  }
+  const target = change.item!
+  if (target.readOnly) throw new Error(`omp: ${target.path} is read-only (${target.readOnly})`)
+  if (change.op === "update") plan.edits.push({ path: target.path, before: await readFile(target.path, "utf8"), after: change.text ?? "" })
+  else if (change.op === "delete") plan.removals.push(target.path)
+  else throw new Error(`omp: memory ${change.op} is not supported`)
+  return plan
 }
 
 // User mcp.json disabledServers/enabledServers apply to servers from every source (mcp-config.md).
@@ -301,9 +339,22 @@ export const omp: HarnessAdapter = {
   id: "omp",
   label: "omp",
   scopes: ["global", "project"],
+  memoryFiles: MEMORY_FILES,
 
   async detect(roots) {
     return existsSync(agentDir(roots))
+  },
+
+  async plan(change, roots) {
+    if (change.kind !== "memory") throw new Error(`omp: ${change.kind} changes are not supported yet`)
+    return planMemory(change, roots)
+  },
+
+  async skillRoots(roots) {
+    const ctx = await loadContext(roots)
+    return skillSources(ctx)
+      .filter((source) => source.allowed !== false && providerOn(ctx, source.provider, source.level))
+      .map(({ path, scope }) => ({ path, scope }))
   },
 
   async list(kind, roots) {

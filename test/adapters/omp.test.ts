@@ -3,7 +3,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { omp } from "../../src/adapters/omp"
-import type { Item, Kind, Roots } from "../../src/core/model"
+import type { Change, Item, Kind, Roots, Scope } from "../../src/core/model"
 
 // A temp copy, because git cannot commit the .git folder and the empty .omp folder the walk-up needs.
 let base: string
@@ -227,4 +227,92 @@ test("bad YAML and JSON give no items and no crash", async () => {
   writeFileSync(join(broken, ".omp/config.yml"), "skills: [\n")
   const mcp = await list("mcp", roots({ project: broken }))
   expect(mcp.some((i) => i.scope === "project")).toBe(false)
+})
+
+const memoryChange = (change: Partial<Change>): Change => ({ kind: "memory", op: "create", target: { harness: "omp", scope: "project" }, ...change })
+const emptyPlan = { edits: [], moves: [], copies: [], removals: [], commands: [], notices: [] }
+
+test("plan create: AGENTS.md or RULES.md in the agent dir or the project .omp", async () => {
+  expect(await omp.plan(memoryChange({ name: "RULES.md", text: "# rules\n" }), roots())).toEqual({
+    ...emptyPlan,
+    edits: [{ path: join(project, ".omp/RULES.md"), before: null, after: "# rules\n" }],
+  })
+  const fresh = join(base, "fresh-agent")
+  const global = memoryChange({ target: { harness: "omp", scope: "global" }, name: "AGENTS.md" })
+  expect((await omp.plan(global, roots({ env: { PI_CODING_AGENT_DIR: fresh } }))).edits).toEqual([
+    { path: join(fresh, "AGENTS.md"), before: null, after: "" },
+  ])
+})
+
+test("plan create refuses a name outside memoryFiles and an existing file", async () => {
+  await expect(omp.plan(memoryChange({ name: "CLAUDE.md" }), roots())).rejects.toThrow("CLAUDE.md")
+  await expect(omp.plan(memoryChange({ name: "AGENTS.md" }), roots())).rejects.toThrow("already exists")
+})
+
+test("plan update edits the item with its current text; delete removes it", async () => {
+  const item = byPath(await list("memory"), join(agentDir, "AGENTS.md"))!
+  const before = await Bun.file(item.path).text()
+  expect(await omp.plan(memoryChange({ op: "update", item, text: "# new\n" }), roots())).toEqual({
+    ...emptyPlan,
+    edits: [{ path: item.path, before, after: "# new\n" }],
+  })
+  expect(await omp.plan(memoryChange({ op: "delete", item }), roots())).toEqual({ ...emptyPlan, removals: [item.path] })
+})
+
+test("plan refuses read-only items and kinds other than memory", async () => {
+  const item = { ...byPath(await list("memory"), join(agentDir, "AGENTS.md"))!, readOnly: "imported from Codex" }
+  await expect(omp.plan(memoryChange({ op: "update", item, text: "x" }), roots())).rejects.toThrow("imported from Codex")
+  await expect(omp.plan(memoryChange({ op: "delete", item }), roots())).rejects.toThrow("imported from Codex")
+  await expect(omp.plan(memoryChange({ kind: "skill" }), roots())).rejects.toThrow("omp: skill changes are not supported yet")
+})
+
+test("memoryFiles names AGENTS.md and RULES.md for both scopes", () => {
+  expect(omp.memoryFiles).toEqual({ global: ["AGENTS.md", "RULES.md"], project: ["AGENTS.md", "RULES.md"] })
+})
+
+type SkillRoot = { path: string; scope: Scope }
+
+test("skillRoots lists turned-on roots, native first", async () => {
+  const native: SkillRoot[] = [
+    { path: join(agentDir, "skills"), scope: "global" },
+    { path: join(agentDir, "managed-skills"), scope: "global" },
+    { path: join(project, ".omp/skills"), scope: "project" },
+    { path: join(repo, ".omp/skills"), scope: "project" },
+  ]
+  const agents: SkillRoot = { path: join(home, ".agents/skills"), scope: "global" }
+  const projectForeign: SkillRoot[] = [
+    { path: join(project, ".claude/skills"), scope: "project" },
+    { path: join(project, ".agents/skills"), scope: "project" },
+  ]
+  expect(await omp.skillRoots(roots())).toEqual([...native, agents, ...projectForeign])
+  globalConfig("enabledProviders: [claude]\nskills:\n  enablePiUser: false\n  enableAgentsProject: false\n")
+  expect(await omp.skillRoots(roots())).toEqual([
+    ...native.slice(1),
+    { path: join(home, ".claude/skills"), scope: "global" },
+    agents,
+    projectForeign[0]!,
+  ])
+})
+
+test("local memory backend files are listed per project, on only with memory.backend: local", async () => {
+  // omp encodes the cwd: strip the leading slash, then / and : become -
+  const root = join(agentDir, "memories", `--${project.slice(1).replaceAll("/", "-")}--`)
+  mkdirSync(root, { recursive: true })
+  for (const file of ["MEMORY.md", "memory_summary.md", "learned.md"]) writeFileSync(join(root, file), `# ${file}\n`)
+  const backend = (items: Item[]) => items.filter((i) => i.path.startsWith(root))
+  const listed = backend(await list("memory"))
+  expect(listed.map((i) => [i.scope, i.name, i.path, i.offIn, i.warnings])).toEqual(
+    ["MEMORY.md", "memory_summary.md", "learned.md"].map((file) => [
+      "project",
+      file,
+      join(root, file),
+      ["omp"],
+      ["omp memory backend file"],
+    ]),
+  )
+  globalConfig("memory:\n  backend: local\n")
+  const loaded = backend(await list("memory"))
+  expect(loaded.every(on)).toBe(true)
+  expect((await omp.plan(memoryChange({ op: "delete", item: loaded[2] }), roots())).removals).toEqual([join(root, "learned.md")])
+  rmSync(join(agentDir, "memories"), { recursive: true })
 })
