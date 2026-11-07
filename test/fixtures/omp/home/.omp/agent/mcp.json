@@ -1,0 +1,10 @@
+{
+  // user servers
+  "mcpServers": {
+    "github": { "type": "http", "url": "https://api.githubcopilot.com/mcp/", "headers": { "Authorization": "Bearer ${GITHUB_TOKEN}" }, "timeout": 5000 },
+    "fs": { "command": "npx", "args": ["-y", "fs-mcp"], "env": { "ROOT": "/tmp" }, "cwd": "/work" },
+    "muted": { "command": "muted-mcp" },
+    "paused": { "command": "paused-mcp", "enabled": false }
+  },
+  "disabledServers": ["muted", "shared"]
+}
