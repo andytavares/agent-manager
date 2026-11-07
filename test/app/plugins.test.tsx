@@ -161,7 +161,7 @@ test("m lists marketplaces; a adds one from a source", async () => {
   }
 })
 
-test("d on the marketplace screen plans its removal; esc goes back to the marketplaces, then the list", async () => {
+test("d on the marketplace screen plans its removal; esc goes back", async () => {
   const setup = await renderApp()
   try {
     await openPluginTab(setup)
@@ -170,8 +170,6 @@ test("d on the marketplace screen plans its removal; esc goes back to the market
     setup.mockInput.pressKey("d")
     await waitForText(setup, "plugin delete official")
     expect(changes).toEqual([{ kind: "plugin", op: "delete", target: { harness: "claude-code", scope: "global" }, marketplace: "official" }])
-    setup.mockInput.pressEscape()
-    await waitForText(setup, "a add  d remove  esc back")
     setup.mockInput.pressEscape()
     await waitForText(setup, "i install")
   } finally {
