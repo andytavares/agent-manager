@@ -28,7 +28,7 @@ export interface Item {
   path: string // real path of the file or folder
   key?: string // entry inside the file, e.g. "mcpServers.linear"
   loadedBy: HarnessId[] // harnesses that load it
-  offIn?: HarnessId[] // harnesses that can read it but have it turned off by their settings
+  offIn?: HarnessId[] // harnesses that can read it but have it turned off; never also in loadedBy
   readOnly?: string // reason, e.g. "imported from Codex"
   warnings?: string[]
 }

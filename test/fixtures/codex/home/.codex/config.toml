@@ -1,0 +1,36 @@
+# Synthetic Codex global config for adapter tests.
+project_doc_fallback_filenames = ["TEAM.md"]
+
+[features]
+memories = true # generated memories are on
+
+[mcp_servers.linear]
+url = "https://mcp.linear.app/mcp"
+bearer_token_env_var = "LINEAR_TOKEN"
+http_headers = { "X-Team" = "core" }
+startup_timeout_sec = 20
+
+[mcp_servers.files]
+command = "npx"
+args = ["-y", "server-files"]
+env = { ROOT = "/tmp" }
+enabled = false # turned off
+
+# Disable one skill by name, then re-enable it: last match wins.
+[[skills.config]]
+name = "pdf"
+enabled = false
+
+[[skills.config]]
+name = "research"
+enabled = false
+
+[[skills.config]]
+name = "research"
+enabled = true
+
+[plugins."linear@official"]
+enabled = false
+
+[plugins."slack@official"]
+enabled = true # named here, not installed
