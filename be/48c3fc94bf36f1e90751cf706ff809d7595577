@@ -1,0 +1,30 @@
+src/adapters/opencode.ts
+  s_b67d2564e0abf8::t_5d8b7d00da23ac 5,114-133,275,279-287
+test/adapters/opencode.test.ts
+  s_b67d2564e0abf8::t_df73b5acc05292 4,219
+  s_b67d2564e0abf8::t_e185dfe3a35f9d 175-190,194-207,211-218,220-232,234
+  s_b67d2564e0abf8::t_8c8c6a6218b351 191-193,208-210
+  s_b67d2564e0abf8::t_7467bc2ce3be7f 233
+test/adapters/omp.test.ts
+  s_b67d2564e0abf8::t_df73b5acc05292 6,273-274,276,282-283,303-304
+  s_b67d2564e0abf8::t_885362a0ee69dc 293
+  s_b67d2564e0abf8::t_80350d5749b721 231-272,275,277-281,284-292,294-302,305-318
+src/adapters/omp.ts
+  s_b67d2564e0abf8::t_f12ae8bab58dd8 6,172-188,190,196-216,342,348-359
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "be48c3fc94bf36f1e90751cf706ff809d7595577",
+  "prompts": {},
+  "sessions": {
+    "s_b67d2564e0abf8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "90c9f7fb-786e-4c92-9416-014143e57bfb",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
