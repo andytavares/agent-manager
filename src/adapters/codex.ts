@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs"
 import { readdir } from "node:fs/promises"
 import { basename, dirname, join, relative } from "node:path"
-import { parse } from "@decimalturn/toml-patch"
+import { parse, patch, stringify } from "@decimalturn/toml-patch"
 import type { Change, HarnessAdapter, Item, ItemDetail, Kind, McpServer, Roots, Scope, WritePlan } from "../core/model"
-import { planMemoryFile } from "../core/memory-plan"
+import { emptyPlan, planMemoryFile } from "../core/memory-plan"
 import { listSkillFolders } from "../core/skills"
 
 type Table = Record<string, any>
@@ -206,7 +206,93 @@ async function read(target: Item): Promise<ItemDetail> {
   return { type: "plugin", plugin: target.key ? { name: target.name, enabled, source } : { name: target.name, enabled, version: basename(target.path), source } }
 }
 
+const ENV_REF = /^\$\{(\w+)\}$/
+const BEARER_REF = /^Bearer \$\{(\w+)\}$/
+
+// Splits headers into Codex's bearer_token_env_var, env_http_headers (exact ${VAR}) and literal http_headers.
+function headerKeys(headers: Record<string, string>, native: Table): Table {
+  const keys: Table = { bearer_token_env_var: undefined, http_headers: {}, env_http_headers: { ...native.env_http_headers } }
+  for (const [header, value] of Object.entries(headers)) {
+    const bearer = header === "Authorization" && BEARER_REF.exec(value)
+    const ref = ENV_REF.exec(value)
+    if (bearer) keys.bearer_token_env_var = bearer[1]
+    else if (ref) keys.env_http_headers[header] = ref[1]
+    else keys.http_headers[header] = value
+  }
+  return keys
+}
+
+// env values that are exactly ${KEY} become env_vars = ["KEY"]; the rest stay literal.
+function envKeys(env: Record<string, string>, native: Table): Table {
+  const keys: Table = { env: {}, env_vars: [...(native.env_vars ?? [])] }
+  for (const [name, value] of Object.entries(env)) {
+    if (value === `\${${name}}`) keys.env_vars.includes(name) || keys.env_vars.push(name)
+    else keys.env[name] = value
+  }
+  return keys
+}
+
+const isEmpty = (value: unknown) => value === undefined || (typeof value === "object" && value !== null && Object.keys(value).length === 0)
+
+function toCodexTable(server: McpServer): Table {
+  if (server.transport === "sse") throw new Error("Codex: SSE MCP servers are not supported; use stdio or streamable HTTP")
+  const { bearer_token_env_var: _bearer, env_vars: _envVars, env_http_headers: _envHeaders, ...native } = server.native
+  const table: Table = {
+    command: server.command,
+    args: server.args,
+    ...envKeys(server.env ?? {}, server.native),
+    url: server.url,
+    ...headerKeys(server.headers ?? {}, server.native),
+    ...native,
+    enabled: server.enabled ? undefined : false,
+  }
+  for (const key of Object.keys(table)) if (isEmpty(table[key])) delete table[key]
+  return table
+}
+
+function patchServers(text: string, servers: Table): string {
+  const doc = parse(text)
+  if (Object.keys(servers).length > 0) doc.mcp_servers = servers
+  else delete doc.mcp_servers
+  return patch(text, doc)
+}
+
+// patch() writes a new sub-table inline at the root, so a new server is appended as its own section.
+// shortcut: strips the [mcp_servers] header stringify adds; upgrade if toml-patch gains a section option.
+function appendServer(text: string, server: McpServer): string {
+  const section = stringify({ mcp_servers: { [server.name]: toCodexTable(server) } }, { inlineTableStart: 2 }).replace(/^\[mcp_servers\]\n\n/, "")
+  const separator = text === "" ? "" : text.endsWith("\n") ? "\n" : "\n\n"
+  return text + separator + section
+}
+
+function editMcpServers(text: string, path: string, { op, item, server }: Change): string {
+  const servers: Table = { ...parse(text).mcp_servers }
+  if (op === "delete") {
+    delete servers[item!.name]
+    return patchServers(text, servers)
+  }
+  if ((op !== "create" && op !== "update") || !server) throw new Error(`Codex: MCP servers cannot ${op}`)
+  if (op === "update" && item!.name === server.name) return patchServers(text, { ...servers, [server.name]: toCodexTable(server) })
+  if (server.name in servers) throw new Error(`Codex: ${server.name} already exists in ${path}`)
+  if (op === "create") return appendServer(text, server)
+  delete servers[item!.name]
+  return appendServer(patchServers(text, servers), server)
+}
+
+async function planMcp(change: Change, roots: Roots): Promise<WritePlan> {
+  const { item } = change
+  if (item?.readOnly) throw new Error(`Codex: ${item.name} is read-only (${item.readOnly})`)
+  const ctx = context(roots)
+  const path = item?.path ?? (change.target.scope === "global" ? ctx.globalPath : ctx.projectPath)
+  const before = existsSync(path) ? readFileSync(path, "utf8") : null
+  const after = editMcpServers(before ?? "", path, change)
+  const notices = ["Start a new Codex session to load this change."]
+  if (path === ctx.projectPath && !ctx.trusted) notices.push("Codex ignores this file until you trust the project.")
+  return { ...emptyPlan(), edits: [{ path, before, after }], notices }
+}
+
 async function plan(change: Change, roots: Roots): Promise<WritePlan> {
+  if (change.kind === "mcp") return planMcp(change, roots)
   if (change.kind !== "memory") throw new Error(`Codex: ${change.kind} changes are not supported yet`)
   if (change.op === "update" && change.item?.warnings?.includes(GENERATED_WARNING)) throw new Error("Codex: generated memories can only be read or deleted")
   const scopeRoot = (scope: Scope) => (scope === "global" ? context(roots).codexHome : projectDirs(roots.project)[0]!)

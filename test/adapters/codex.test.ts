@@ -2,8 +2,9 @@ import { beforeEach, expect, test } from "bun:test"
 import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parse } from "@decimalturn/toml-patch"
 import { codex } from "../../src/adapters/codex"
-import type { Change, FileEdit, Item, Kind, Roots, WritePlan } from "../../src/core/model"
+import type { Change, FileEdit, Item, Kind, McpServer, Roots, WritePlan } from "../../src/core/model"
 
 const fixtures = join(import.meta.dir, "../fixtures/codex")
 let base: string
@@ -229,4 +230,118 @@ test("memoryFiles and skillRoots", async () => {
     { path: join(project, "sub/.agents/skills"), scope: "project" },
     { path: join(project, ".agents/skills"), scope: "project" },
   ])
+})
+
+const SESSION_NOTICE = "Start a new Codex session to load this change."
+const UNTRUSTED_NOTICE = "Codex ignores this file until you trust the project."
+const mcpChange = (fields: Partial<Change> & Pick<Change, "op">): Change => ({ kind: "mcp", target: { harness: "codex", scope: "global" }, ...fields })
+const globalConfig = () => join(codexHome, "config.toml")
+const stdio = (name: string, fields: Partial<McpServer> = {}): McpServer => ({ name, transport: "stdio", enabled: true, native: {}, ...fields })
+
+async function mcpServer(name: string): Promise<{ item: Item; server: McpServer }> {
+  const item = (await byName("mcp"))[name]!
+  const detail = await codex.read(item)
+  if (detail.type !== "mcp") throw new Error("not an MCP item")
+  return { item, server: detail.server }
+}
+
+test("plan creates an MCP server at the end of the global config and keeps the rest byte-identical", async () => {
+  const before = readFileSync(globalConfig(), "utf8")
+  const server: McpServer = {
+    name: "github",
+    transport: "http",
+    enabled: true,
+    url: "https://api.githubcopilot.com/mcp/",
+    headers: { Authorization: "Bearer ${GH_TOKEN}", "X-Org": "${GH_ORG}", "X-Team": "core" },
+    native: { startup_timeout_sec: 30 },
+  }
+  const plan = await codex.plan(mcpChange({ op: "create", server }), roots)
+  const added = [
+    "[mcp_servers.github]",
+    'url = "https://api.githubcopilot.com/mcp/"',
+    'bearer_token_env_var = "GH_TOKEN"',
+    'http_headers = { X-Team = "core" }',
+    'env_http_headers = { X-Org = "GH_ORG" }',
+    "startup_timeout_sec = 30",
+    "",
+  ].join("\n")
+  expect(plan).toEqual({ ...editsOnly([{ path: globalConfig(), before, after: `${before}\n${added}` }]), notices: [SESSION_NOTICE] })
+})
+
+test("plan refuses to create an MCP server whose name exists in that file", async () => {
+  await expect(codex.plan(mcpChange({ op: "create", server: stdio("linear", { command: "x" }) }), roots)).rejects.toThrow("linear already exists")
+})
+
+test("plan update maps env refs to env_vars, other env to env, and omits enabled = true", async () => {
+  const { item } = await mcpServer("files")
+  const server = stdio("files", { command: "npx", env: { ROOT: "/tmp", API_KEY: "${API_KEY}", OTHER: "${X}" } })
+  const after = (await codex.plan(mcpChange({ op: "update", item, server }), roots)).edits[0]!.after!
+  expect(parse(after).mcp_servers.files).toEqual({ command: "npx", env: { ROOT: "/tmp", OTHER: "${X}" }, env_vars: ["API_KEY"] })
+  expect(after).toContain("# Disable one skill by name, then re-enable it: last match wins.\n")
+})
+
+test("plan update maps Bearer and env-ref headers and drops a removed bearer token", async () => {
+  const { item, server } = await mcpServer("linear")
+  const headers = { "X-Team": "core", "X-Key": "${LINEAR_KEY}" }
+  const after = (await codex.plan(mcpChange({ op: "update", item, server: { ...server, headers } }), roots)).edits[0]!.after!
+  expect(parse(after).mcp_servers.linear).toEqual({
+    url: "https://mcp.linear.app/mcp",
+    http_headers: { "X-Team": "core" },
+    env_http_headers: { "X-Key": "LINEAR_KEY" },
+    startup_timeout_sec: 20,
+  })
+})
+
+test("a read then update with no edits gives an edit whose after equals before", async () => {
+  appendFileSync(globalConfig(), '\n[mcp_servers.keys]\ncommand = "k"\nenv_vars = ["A"] # from env\nenv_http_headers = { X-B = "B" }\ncwd = "/w"\n')
+  for (const name of ["linear", "files", "keys"]) {
+    const { item, server } = await mcpServer(name)
+    const [edit] = (await codex.plan(mcpChange({ op: "update", item, server }), roots)).edits
+    expect(edit!.after).toBe(edit!.before)
+  }
+})
+
+test("plan update with a new name replaces the old table", async () => {
+  const { item, server } = await mcpServer("linear")
+  const after = (await codex.plan(mcpChange({ op: "update", item, server: { ...server, name: "linear-team" } }), roots)).edits[0]!.after!
+  const servers = parse(after).mcp_servers
+  expect(Object.keys(servers)).toEqual(["files", "linear-team"])
+  expect(servers["linear-team"]).toEqual(parse(readFileSync(globalConfig(), "utf8")).mcp_servers.linear)
+  expect(after).toContain("[mcp_servers.linear-team]\n")
+})
+
+test("plan delete removes only that table", async () => {
+  const before = readFileSync(globalConfig(), "utf8")
+  const { item } = await mcpServer("files")
+  const block = '[mcp_servers.files]\ncommand = "npx"\nargs = ["-y", "server-files"]\nenv = { ROOT = "/tmp" }\nenabled = false # turned off\n\n'
+  expect(await codex.plan(mcpChange({ op: "delete", item }), roots)).toEqual({
+    ...editsOnly([{ path: globalConfig(), before, after: before.replace(block, "") }]),
+    notices: [SESSION_NOTICE],
+  })
+})
+
+test("plan creates the project config when absent and warns while the project is not trusted", async () => {
+  rmSync(join(project, ".codex"), { recursive: true })
+  const change = mcpChange({ op: "create", target: { harness: "codex", scope: "project" }, server: stdio("tool", { command: "./bin/tool", enabled: false }) })
+  expect(await codex.plan(change, roots)).toEqual({
+    ...editsOnly([{ path: join(project, ".codex", "config.toml"), before: null, after: '[mcp_servers.tool]\ncommand = "./bin/tool"\nenabled = false\n' }]),
+    notices: [SESSION_NOTICE, UNTRUSTED_NOTICE],
+  })
+})
+
+test("a trusted project gets no untrusted notice", async () => {
+  trustProject()
+  const { item, server } = await mcpServer("repo")
+  expect((await codex.plan(mcpChange({ op: "update", target: { harness: "codex", scope: "project" }, item, server }), roots)).notices).toEqual([SESSION_NOTICE])
+})
+
+test("plan refuses a read-only MCP server and an SSE server", async () => {
+  const { item, server } = await mcpServer("linear")
+  const locked = { ...item, readOnly: "imported from Claude Code" }
+  await expect(codex.plan(mcpChange({ op: "delete", item: locked }), roots)).rejects.toThrow("imported from Claude Code")
+  await expect(codex.plan(mcpChange({ op: "update", item, server: { ...server, transport: "sse" } }), roots)).rejects.toThrow("SSE")
+})
+
+test("plan still throws for plugins", async () => {
+  await expect(codex.plan(mcpChange({ op: "create", kind: "plugin" }), roots)).rejects.toThrow("Codex: plugin changes are not supported yet")
 })
