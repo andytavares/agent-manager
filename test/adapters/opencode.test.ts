@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parse } from "jsonc-parser"
 import { configShape, opencode } from "../../src/adapters/opencode"
-import type { Change, Item, McpServer, Roots, Scope } from "../../src/core/model"
+import type { Change, Item, McpServer, PluginInfo, Roots, Scope } from "../../src/core/model"
 
 const fixtures = join(import.meta.dir, "../fixtures/opencode")
 
@@ -210,7 +210,7 @@ test("plan refuses read-only items and kinds other than memory", async () => {
   const readOnly = { ...item!, readOnly: "imported from Codex" }
   await expect(opencode.plan(memoryChange({ op: "update", item: readOnly, text: "x" }), v2)).rejects.toThrow("imported from Codex")
   await expect(opencode.plan(memoryChange({ op: "delete", item: readOnly }), v2)).rejects.toThrow("imported from Codex")
-  await expect(opencode.plan(memoryChange({ kind: "plugin" }), v2)).rejects.toThrow("OpenCode: plugin changes are not supported yet")
+  await expect(opencode.plan(memoryChange({ kind: "skill" }), v2)).rejects.toThrow("OpenCode: skill changes are not supported yet")
 })
 
 test("memoryFiles names AGENTS.md for both scopes", () => {
@@ -312,4 +312,97 @@ test("plan mcp refuses read-only items", async () => {
   const item = { ...(await mcpItem(v2, "mcp.servers.fs")), readOnly: "imported from Codex" }
   await expect(opencode.plan(mcpChange({ op: "delete", item }), v2)).rejects.toThrow("imported from Codex")
   await expect(opencode.plan(mcpChange({ op: "update", item, server: stdio() }), v2)).rejects.toThrow("imported from Codex")
+})
+
+// ---- plugin plans (plan never writes, so the fixtures are read in place)
+
+const pluginChange = (change: Partial<Change>): Change => ({ kind: "plugin", op: "create", target: { harness: "opencode", scope: "global" }, ...change })
+const npm = (plugin: Partial<PluginInfo> = {}): PluginInfo => ({ name: "oc-new", enabled: true, source: "npm", ...plugin })
+const pluginNotice = ["Restart OpenCode to load this change; it installs npm plugins at start-up."]
+const pluginEdit = async (change: Change, r: Roots) => {
+  const plan = await opencode.plan(change, r)
+  expect(plan.notices).toEqual(pluginNotice)
+  expect(plan.edits).toHaveLength(1)
+  return plan.edits[0]!
+}
+const pluginItem = async (r: Roots, keyOrName: string) =>
+  (await opencode.list("plugin", r)).find((item) => item.key === keyOrName || (!item.key && item.name === keyOrName))!
+
+test("plan plugin install appends name@version to the v2 plugins array, comments kept", async () => {
+  const edit = await pluginEdit(pluginChange({ plugin: npm({ version: "2.1.0" }) }), v2)
+  expect(edit.path).toBe(join(v2.home, ".config/opencode/opencode.jsonc"))
+  expect(edit.after).toContain("// global v2 config")
+  expect(parse(edit.after!).plugins).toEqual(["opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }, "-oc-off", "oc-new@2.1.0"])
+})
+
+test("plan plugin install appends to the v1 plugin array, and adds the array to a project file without one", async () => {
+  const edit = await pluginEdit(pluginChange({ plugin: npm() }), v1)
+  expect(edit.after).toContain("// global v1 config")
+  expect(parse(edit.after!).plugin).toEqual(["oc-v1-plugin", "oc-new"])
+  const project = await pluginEdit(pluginChange({ target: { harness: "opencode", scope: "project" }, plugin: npm() }), v1)
+  expect(project.path).toBe(join(v1.project, "opencode.jsonc"))
+  expect(parse(project.after!).plugin).toEqual(["oc-new"])
+})
+
+test("plan plugin install in a new file takes the key from OPENCODE_VERSION: 1.x plugin, otherwise plugins", async () => {
+  const home = mkdtempSync(join(tmpdir(), "opencode-"))
+  const fresh = (version: string): Roots => ({ home, project: join(home, "project"), env: { OPENCODE_VERSION: version } })
+  const v1Edit = await pluginEdit(pluginChange({ plugin: npm() }), fresh("1.4.2"))
+  expect(v1Edit.path).toBe(join(home, ".config/opencode/opencode.json"))
+  expect(v1Edit.before).toBeNull()
+  expect(parse(v1Edit.after!)).toEqual({ plugin: ["oc-new"] })
+  expect(parse((await pluginEdit(pluginChange({ plugin: npm() }), fresh("2.0.0"))).after!)).toEqual({ plugins: ["oc-new"] })
+  rmSync(home, { recursive: true, force: true })
+})
+
+test("plan plugin install refuses a name already in the array, with or without version or '-'", async () => {
+  await expect(opencode.plan(pluginChange({ plugin: npm({ name: "opencode-wakatime" }) }), v2)).rejects.toThrow("opencode-wakatime is already in")
+  await expect(opencode.plan(pluginChange({ plugin: npm({ name: "@acme/oc-tools" }) }), v2)).rejects.toThrow("already in")
+  await expect(opencode.plan(pluginChange({ plugin: npm({ name: "oc-off" }) }), v2)).rejects.toThrow("already in")
+})
+
+test("plan plugin uninstall removes the array element; a local plugin file or folder is removed", async () => {
+  const edit = await pluginEdit(pluginChange({ op: "delete", item: await pluginItem(v2, "plugins[1]") }), v2)
+  expect(edit.after).toContain("// global v2 config")
+  expect(parse(edit.after!).plugins).toEqual(["opencode-wakatime@1.2.0", "-oc-off"])
+  const first = await pluginEdit(pluginChange({ op: "delete", item: await pluginItem(v2, "plugins[0]") }), v2)
+  expect(parse(first.after!).plugins).toEqual([{ package: "@acme/oc-tools", options: { level: 2 } }, "-oc-off"])
+  const only = await pluginEdit(pluginChange({ op: "delete", item: await pluginItem(v1, "plugin[0]") }), v1)
+  expect(parse(only.after!).plugin).toEqual([])
+  const local = await pluginItem(v2, "local-dir")
+  expect(await opencode.plan(pluginChange({ op: "delete", item: local }), v2)).toEqual({ ...emptyPlan, removals: [local.path], notices: pluginNotice })
+})
+
+test("plan plugin v2 disable adds a '-name' entry; enable removes it", async () => {
+  const wakatime = await pluginItem(v2, "plugins[0]")
+  const off = await pluginEdit(pluginChange({ op: "update", item: wakatime, plugin: npm({ name: "opencode-wakatime", version: "1.2.0", enabled: false }) }), v2)
+  expect(parse(off.after!).plugins).toEqual(["opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }, "-oc-off", "-opencode-wakatime"])
+  const ocOff = await pluginItem(v2, "plugins[2]")
+  const on = await pluginEdit(pluginChange({ op: "update", item: ocOff, plugin: npm({ name: "oc-off" }) }), v2)
+  expect(parse(on.after!).plugins).toEqual(["opencode-wakatime@1.2.0", { package: "@acme/oc-tools", options: { level: 2 } }])
+})
+
+test("plan plugin toggle refuses v1 and local plugin files", async () => {
+  const v1Plugin = await pluginItem(v1, "plugin[0]")
+  await expect(opencode.plan(pluginChange({ op: "update", item: v1Plugin, plugin: npm({ name: "oc-v1-plugin", enabled: false }) }), v1)).rejects.toThrow(
+    "OpenCode 1.x cannot turn a plugin off; uninstall it instead",
+  )
+  const local = await pluginItem(v2, "local.ts")
+  await expect(opencode.plan(pluginChange({ op: "update", item: local, plugin: npm({ name: "local.ts", enabled: false }) }), v2)).rejects.toThrow("local plugin file")
+})
+
+test("plan plugin version update replaces the entry; an object entry keeps its options, a '-' entry stays off", async () => {
+  const wakatime = await pluginEdit(pluginChange({ op: "update", item: await pluginItem(v2, "plugins[0]"), plugin: npm({ name: "opencode-wakatime", version: "1.3.0" }) }), v2)
+  expect(parse(wakatime.after!).plugins[0]).toBe("opencode-wakatime@1.3.0")
+  const tools = await pluginEdit(pluginChange({ op: "update", item: await pluginItem(v2, "plugins[1]"), plugin: npm({ name: "@acme/oc-tools", version: "3.0.0" }) }), v2)
+  expect(parse(tools.after!).plugins[1]).toEqual({ package: "@acme/oc-tools@3.0.0", options: { level: 2 } })
+  const ocOff = await pluginEdit(pluginChange({ op: "update", item: await pluginItem(v2, "plugins[2]"), plugin: npm({ name: "oc-off", version: "0.9.0", enabled: false }) }), v2)
+  expect(parse(ocOff.after!).plugins[2]).toBe("-oc-off@0.9.0")
+  const v1Edit = await pluginEdit(pluginChange({ op: "update", item: await pluginItem(v1, "plugin[0]"), plugin: npm({ name: "oc-v1-plugin", version: "2.0.0" }) }), v1)
+  expect(parse(v1Edit.after!).plugin).toEqual(["oc-v1-plugin@2.0.0"])
+})
+
+test("plan plugin refuses read-only items", async () => {
+  const item = { ...(await pluginItem(v2, "plugins[0]")), readOnly: "imported from Codex" }
+  await expect(opencode.plan(pluginChange({ op: "delete", item }), v2)).rejects.toThrow("imported from Codex")
 })

@@ -293,6 +293,48 @@ async function readPlugin(item: Item): Promise<PluginInfo> {
   return toPlugin(pluginArray(file)?.[1][index])!
 }
 
+const PLUGIN_NOTICE = "Restart OpenCode to load this change; it installs npm plugins at start-up."
+const pluginSpec = (plugin: PluginInfo) => (plugin.version ? `${plugin.name}@${plugin.version}` : plugin.name)
+
+async function planPlugin(change: Change, roots: Roots): Promise<WritePlan> {
+  const item = change.item
+  if (item?.readOnly) throw new Error(`OpenCode: ${item.name} is read-only (${item.readOnly})`)
+  if (item && !item.key) {
+    if (change.op !== "delete") throw new Error(`OpenCode: ${item.name} is a local plugin file; it cannot be turned off or updated, only uninstalled`)
+    return { ...emptyPlan(), removals: [item.path], notices: [PLUGIN_NOTICE] }
+  }
+  const path = item ? item.path : createTarget(change.target.scope, roots)
+  const before = existsSync(path) ? await readFile(path, "utf8") : null
+  const after = item ? editPluginEntry(change, item, before ?? "") : addPlugin(change.plugin!, { path, before }, roots)
+  return { ...emptyPlan(), edits: [{ path, before, after }], notices: [PLUGIN_NOTICE] }
+}
+
+function addPlugin(plugin: PluginInfo, { path, before }: { path: string; before: string | null }, roots: Roots): string {
+  const data = before === null ? undefined : parseConfig(before)
+  const known = shapeOf(data)
+  const shape = known === "unknown" ? installedShape(roots) : known
+  const entries = pluginArray({ path, scope: "global", data: data ?? {}, shape })?.[1] ?? []
+  if (entries.some((entry) => toPlugin(entry)?.name === plugin.name)) throw new Error(`OpenCode: ${plugin.name} is already in ${path}`)
+  return setJsonc(before ?? "{}\n", [shape === "v2" ? "plugins" : "plugin", -1], pluginSpec(plugin))
+}
+
+// jsonc-parser 3.3.1 corrupts a one-line array when it removes the last element, so the element is cut here.
+// The item key ("plugins[2]") names the array and the index; "-name" entries are v2's way to turn a plugin off.
+function editPluginEntry(change: Change, item: Item, text: string): string {
+  const [, field, index] = /^(\w+)\[(\d+)\]$/.exec(item.key!)!
+  const at: JSONPath = [field!, Number(index)]
+  if (change.op === "delete") return setJsonc(text, at, undefined)
+  const plugin = change.plugin!
+  const entry = (parseConfig(text)?.[field!] as unknown[])[Number(index)]
+  const current = toPlugin(entry)!
+  if (plugin.enabled !== current.enabled) {
+    if (field === "plugin") throw new Error("OpenCode 1.x cannot turn a plugin off; uninstall it instead")
+    return plugin.enabled ? setJsonc(text, at, undefined) : setJsonc(text, [field!, -1], `-${plugin.name}`)
+  }
+  const spec = (current.enabled ? "" : "-") + pluginSpec(plugin)
+  return setJsonc(text, isObject(entry) ? [...at, "package"] : at, spec)
+}
+
 // ---- adapter
 
 async function listKind(kind: Kind, roots: Roots): Promise<Item[]> {
@@ -313,6 +355,7 @@ export const opencode: HarnessAdapter = {
   },
   async plan(change, roots) {
     if (change.kind === "mcp") return planMcp(change, roots)
+    if (change.kind === "plugin") return planPlugin(change, roots)
     if (change.kind !== "memory") throw new Error(`OpenCode: ${change.kind} changes are not supported yet`)
     return planMemory(change, roots)
   },
