@@ -1,7 +1,6 @@
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react"
 import { basename, dirname } from "node:path"
-import type { AutoEntry } from "../memory/types"
 import { search } from "../memory/fuzzy"
 import { defaultBackupRoot } from "../core/apply"
 import { undoLast } from "../core/undo"
@@ -79,7 +78,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   const { tab, focus, harnessIndex } = view
   const harness = adapters[harnessIndex - 1]
   const byHarness = harness ? listing.items.filter((item) => matchesHarness(item, harness.id)) : listing.items
-  const visible = byNameFilter(byHarness, filter.text)
+  const visible = byHarness.filter((item) => item.name.toLowerCase().includes(filter.text.toLowerCase()))
   const shown = tab === "memory" ? search(filter.text, entries.entries) : []
   const entryGroup = entries.dir === "" ? entries : { ...entries, entries: shown }
   const selected = Math.min(view.listIndex, visible.length + entryGroup.entries.length - 1)
@@ -371,11 +370,6 @@ async function loadListing(adapters: HarnessAdapter[], roots: Roots, kind: Kind)
 
 function matchesHarness(item: Item, id: HarnessId): boolean {
   return item.harness === id || item.loadedBy.includes(id) || (item.offIn?.includes(id) ?? false)
-}
-
-// Every tab but Memory: keep the items whose name holds the filter text.
-function byNameFilter(items: Item[], text: string): Item[] {
-  return items.filter((item) => item.name.toLowerCase().includes(text.toLowerCase()))
 }
 
 function agentsOf(adapters: HarnessAdapter[], detected: boolean[], items: Item[]): AgentsPaneProps["agents"] {
