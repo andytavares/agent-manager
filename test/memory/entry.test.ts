@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { backlinks, loadEntries, parseFrontmatter, parseIndex } from "../../src/memory/entry"
+import { backlinks, loadEntries, parseEntryFrontmatter, parseIndex } from "../../src/memory/entry"
 import type { AutoEntry } from "../../src/memory/types"
 
 const INDEX = `- [Plain voice](feedback_plain_voice.md) — no flattery, short sentences
@@ -66,19 +66,19 @@ const fixture = () =>
 
 const byFile = (entries: AutoEntry[], file: string) => entries.find((e) => e.file === file)!!
 
-describe("parseFrontmatter", () => {
+describe("parseEntryFrontmatter", () => {
   test("reads valid YAML", () => {
-    expect(parseFrontmatter("name: a\ntype: user")).toEqual({ meta: { name: "a", type: "user" }, valid: true })
+    expect(parseEntryFrontmatter("name: a\ntype: user")).toEqual({ meta: { name: "a", type: "user" }, valid: true })
   })
 
   test("falls back to key: value lines when YAML is invalid", () => {
-    const { meta, valid } = parseFrontmatter("description: Where: here\ntype: reference")
+    const { meta, valid } = parseEntryFrontmatter("description: Where: here\ntype: reference")
     expect(valid).toBe(false)
     expect(meta.type).toBe("reference")
   })
 
   test("keeps a nested metadata type when YAML is invalid", () => {
-    const { meta, valid } = parseFrontmatter("name: x\ndescription: Where: it lives\nmetadata:\n  type: reference")
+    const { meta, valid } = parseEntryFrontmatter("name: x\ndescription: Where: it lives\nmetadata:\n  type: reference")
     expect(valid).toBe(false)
     expect(meta.metadata?.type).toBe("reference")
   })

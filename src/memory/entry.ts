@@ -24,7 +24,7 @@ export function readSource(spec: SourceSpec): Source {
 }
 
 // Claude writes unquoted values that contain ": ", which strict YAML rejects; fall back to key: value lines.
-export function parseFrontmatter(text: string): { meta: Meta; valid: boolean } {
+export function parseEntryFrontmatter(text: string): { meta: Meta; valid: boolean } {
   try {
     const parsed = parseYaml(text)
     if (parsed && typeof parsed === "object") return { meta: parsed as Meta, valid: true }
@@ -61,7 +61,7 @@ function readEntryFile(path: string): EntryFile {
   const text = readFileSync(path, "utf8")
   const block = text.match(FRONTMATTER_PATTERN)
   if (!block) return { meta: {}, valid: false, raw: "", body: text }
-  return { ...parseFrontmatter(block[1]!), raw: block[1]!, body: text.slice(block[0].length) }
+  return { ...parseEntryFrontmatter(block[1]!), raw: block[1]!, body: text.slice(block[0].length) }
 }
 
 const linksIn = (body: string) => [...stripCode(body).matchAll(LINK_PATTERN)].map((x) => x[1]!.trim())
