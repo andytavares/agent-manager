@@ -29,6 +29,7 @@ export interface FlowContext {
   review: (...changes: Change[]) => void // plans each change and opens one review screen
   open: (screen: Screen) => void
   back: () => void // to the last list screen: the item list, projects or marketplaces
+  notify: (text: string, error?: boolean) => void // one line under the panels
 }
 
 function target(item: Item) {

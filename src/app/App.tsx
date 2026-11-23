@@ -2,12 +2,14 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react"
 import { basename, dirname } from "node:path"
 import { search } from "../memory/fuzzy"
+import type { Issue } from "../memory/issues"
 import { defaultBackupRoot } from "../core/apply"
 import { undoLast } from "../core/undo"
 import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, ProjectData, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
 import { entryItem, useEntries } from "./entries"
+import { Health, runIssueAction, useIssues } from "./Health"
 import { addMarketplace, addMemory, deleteItem, deleteProjects, editItem, type FlowContext, type Marketplace, marketplaceList, newSkill, projectList, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
 import { ItemList } from "./ItemList"
 import { Marketplaces } from "./Marketplaces"
@@ -34,7 +36,7 @@ const STATUS: Record<string, string> = {
   skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}  ? help`,
   mcp: `a add  e edit  c copy to…  d delete  space on/off  ${LIST_KEYS}  ? help`,
   plugin: `i install  space on/off  U update  x uninstall  m marketplaces  ${LIST_KEYS}  ? help`,
-  health: `${LIST_KEYS}  ? help`,
+  health: `f fix  r unlink  e edit file  ${LIST_KEYS}  ? help`,
   prompt: "↑↓ choose  enter next  esc cancel  ? help",
   editor: "ctrl+s review & save  esc discard  ? help",
   mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel  ? help",
@@ -75,15 +77,19 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   const listing = useListing(adapters, roots, view.tab === "health" ? "memory" : view.tab, reloads)
   const usage = useUsage(listing.items, view.tab, roots)
   const entries = useEntries(roots, reloads)
+  const issues = useIssues(adapters, roots, reloads)
   const { tab, focus, harnessIndex } = view
   const harness = adapters[harnessIndex - 1]
   const byHarness = harness ? listing.items.filter((item) => matchesHarness(item, harness.id)) : listing.items
+  const healthItems = tab === "health" ? listing.items : [] // the Memory listing when the Health tab reads it
   const visible = byHarness.filter((item) => item.name.toLowerCase().includes(filter.text.toLowerCase()))
   const shown = tab === "memory" ? search(filter.text, entries.entries) : []
   const entryGroup = entries.dir === "" ? entries : { ...entries, entries: shown }
   const selected = Math.min(view.listIndex, visible.length + entryGroup.entries.length - 1)
   const selectedEntry = selected >= visible.length ? entryGroup.entries[selected - visible.length] : undefined
   const selectedItem = selectedEntry ? entryItem(selectedEntry) : visible[selected]
+  const issueIndex = clamp(view.listIndex, issues.length - 1)
+  const selectedIssue = issues[issueIndex]
   const fail = (error: Error) => {
     setMessage({ text: error.message, error: true })
     show(LIST)
@@ -99,6 +105,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
       }, fail),
     open: show,
     back: () => (returnTo === "list" ? show(LIST) : start(returnTo === "projects" ? projectList(context) : marketplaceList(context))),
+    notify: (text, error = false) => setMessage({ text, error }),
   }
   const openProject = (picked: ProjectData) => {
     if (!picked.path) return setMessage({ text: `Cannot open ${basename(picked.dataDir)}: its project folder is unknown.`, error: true })
@@ -134,7 +141,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
     if (handleShellKey(key, shellKeys)) return
     const name = key.shift && key.name.length === 1 ? key.name.toUpperCase() : key.name
     if (tab === "health") {
-      if (KIND_KEYS[name] || name === "tab") dispatch({ name, harnessCount: adapters.length, listLength: 0 })
+      if (!runHealthKey(name, { issue: selectedIssue, items: healthItems, context, start })) dispatch({ name, harnessCount: adapters.length, listLength: issues.length })
     }
     else if (!runAction(name, { kind: tab, item: selectedItem, context, start })) {
       dispatch({ name, harnessCount: adapters.length, listLength: visible.length + entryGroup.entries.length })
@@ -145,7 +152,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   return (
     <box flexDirection="column" border width="100%" height="100%">
       <Header project={basename(roots.project)} agent={harness?.label ?? "All agents"} />
-      <Tabs tab={tab} counts={tabCounts(adapters, roots, reloads)} />
+      <Tabs tab={tab} counts={tabCounts(adapters, roots, reloads)} issues={issues.length} />
       {showHelp ? (
         <Help />
       ) : screen.name !== "list" ? (
@@ -163,10 +170,10 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
               <text fg={DIM} wrapMode="none">{" p switch  P delete"}</text>
             </box>
           </box>
-          <box flexGrow={1} flexDirection="column" border borderStyle="rounded" borderColor={focus === "list" ? theme.borderActive : theme.border} title={` ${panelTitle(tab, listing.items.length)} `} titleColor={DIM} overflow="hidden">
+          <box flexGrow={1} flexDirection="column" border borderStyle="rounded" borderColor={focus === "list" ? theme.borderActive : theme.border} title={` ${panelTitle(tab, listing.items.length, issues.length)} `} titleColor={DIM} overflow="hidden">
             <box flexGrow={1} flexDirection="column" overflow="hidden">
               {tab === "health" ? (
-                <text fg={DIM}> No issues.</text>
+                <Health issues={issues} selected={selectedIssue ? issueIndex : -1} layout={{ home: roots.home, width: ruleWidth }} />
               ) : listing.error ? (
                 <text fg={theme.err}>{listing.error}</text>
               ) : (
@@ -207,6 +214,22 @@ interface ActionTarget {
   item: Item | undefined
   context: FlowContext
   start: (next: Screen | Promise<Screen | void>) => void
+}
+
+interface HealthTarget {
+  issue: Issue | undefined
+  items: Item[] // the Memory listing, which holds the auto memory files and the MCP items' files
+  context: FlowContext
+  start: (next: Screen | Promise<Screen | void>) => void
+}
+
+// Health keys: f, r and e act on the issue; tab keys and the arrows fall through to pressKey.
+function runHealthKey(name: string, { issue, items, context, start }: HealthTarget): boolean {
+  if (KIND_KEYS[name]) return false
+  const next = runIssueAction(name, issue && { issue, items, context })
+  if (!next) return false
+  start(next)
+  return true
 }
 
 // List keys of each kind; returns false when the key is not an action.
@@ -394,18 +417,24 @@ function Header({ project, agent }: { project: string; agent: string }) {
   )
 }
 
-function Tabs({ tab, counts }: { tab: Tab; counts: number[] | null }) {
+function Tabs({ tab, counts, issues }: { tab: Tab; counts: number[] | null; issues: number }) {
   return (
     <box flexShrink={0} backgroundColor={theme.bg} paddingLeft={1} paddingRight={1}>
       <text>
         {TAB_NAMES.map((name) => (
           <span key={name} fg={name.slice(2) === tabTitle(tab) ? theme.selFg : DIM} bg={name.slice(2) === tabTitle(tab) ? SELECTED_BG : undefined}>
-            {` ${name}${counts ? ` ${counts[TAB_NAMES.indexOf(name)] ?? "—"}` : ""}  `}
+            {` ${name}${tabCount(name, counts, issues)}  `}
           </span>
         ))}
       </text>
     </box>
   )
+}
+
+// Health shows a warning with its issue count; the other tabs show their item count.
+function tabCount(name: string, counts: number[] | null, issues: number): string {
+  if (name === "5 Health") return ` ▲${issues}`
+  return counts ? ` ${counts[TAB_NAMES.indexOf(name)] ?? "—"}` : ""
 }
 
 // The item count of each tab, listed in the background so the tab row shows a number before it is opened.
@@ -425,8 +454,8 @@ function tabTitle(tab: Tab): string {
 }
 
 // The list panel title carries the row count shown in it.
-function panelTitle(tab: Tab, count: number): string {
-  return tab === "health" ? tabTitle(tab) : `${tabTitle(tab)} · ${count}`
+function panelTitle(tab: Tab, count: number, issues: number): string {
+  return tab === "health" ? `${tabTitle(tab)} · ${issues} issues` : `${tabTitle(tab)} · ${count}`
 }
 
 const KINDS: Kind[] = ["memory", "skill", "mcp", "plugin"]
