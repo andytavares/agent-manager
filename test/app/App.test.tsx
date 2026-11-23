@@ -58,9 +58,8 @@ test("pressing 3 lists the MCP servers of both scopes", async () => {
   try {
     await setup.waitForFrame((frame) => frame.includes("CLAUDE.md"))
     setup.mockInput.pressKey("3")
-    const frame = await setup.waitForFrame((f) => f.includes("playwright"))
+    const frame = await setup.waitForFrame((f) => f.includes("playwright") && f.includes("type      http"))
     expect(frame).toContain("linear")
-    expect(frame).toContain("stdio")
     expect(frame).toContain("postgres")
   } finally {
     setup.renderer.destroy()
@@ -168,9 +167,9 @@ test("/ filters the list by name; esc clears the filter", async () => {
     const filtered = setup.captureCharFrame()
     expect(filtered).toContain("filter: play")
     expect(filtered).toContain("playwright")
-    expect(filtered).not.toContain("linear      http") // the list row, not the detail pane
-    const cleared = await pressEscapeUntil(setup, "linear      http")
-    expect(cleared).toContain("linear      http")
+    expect(filtered).not.toContain("linear              user") // the list row, not the detail pane
+    const cleared = await pressEscapeUntil(setup, "linear              user")
+    expect(cleared).toContain("linear              user")
     expect(cleared).not.toContain("filter:")
   } finally {
     setup.renderer.destroy()

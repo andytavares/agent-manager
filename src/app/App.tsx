@@ -1,7 +1,8 @@
-import { useKeyboard } from "@opentui/react"
+import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react"
-import { basename } from "node:path"
+import { basename, dirname } from "node:path"
 import { defaultBackupRoot } from "../core/apply"
+import { undoLast } from "../core/undo"
 import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, ProjectData, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
@@ -14,6 +15,7 @@ import { Prompt } from "./Prompt"
 import { ReviewChanges } from "./ReviewChanges"
 import { ACCENT, DIM, SELECTED_BG, theme } from "./theme"
 import { TextEditor } from "./TextEditor"
+import { useUsage } from "./usage"
 
 type Focus = "agents" | "list"
 type ListScreen = "list" | "projects" | "marketplaces" // where back and apply return to
@@ -24,19 +26,19 @@ const TAB_NAMES = ["1 Memory", "2 Skills", "3 MCP", "4 Plugins", "5 Health"]
 const LIST: Screen = { name: "list" }
 const NO_MESSAGE = { text: "", error: false }
 const NO_FILTER = { text: "", active: false }
-const LIST_KEYS = "1-5 tab  tab pane  s agent  p project  / filter  ? help  q quit"
+const LIST_KEYS = "u undo  1-5 tab  tab pane  s agent  p project  / filter  q quit"
 const STATUS: Record<string, string> = {
-  memory: `a add  e/enter edit  d delete  ${LIST_KEYS}`,
-  skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}`,
-  mcp: `a add  e edit  c copy to…  d delete  space on/off  ${LIST_KEYS}`,
-  plugin: `i install  space on/off  u update  x uninstall  m marketplaces  ${LIST_KEYS}`,
-  health: LIST_KEYS,
-  prompt: "↑↓ choose  enter next  esc cancel",
-  editor: "ctrl+s review & save  esc discard",
-  mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel",
-  review: "enter apply  esc back",
-  marketplaces: "a add  d remove  esc back",
-  projects: "space mark  d delete Claude Code data of marked or highlighted  enter open  esc keep current project",
+  memory: `a add  e/enter edit  d delete  ${LIST_KEYS}  ? help`,
+  skill: `a new skill  enter edit SKILL.md  c copy to…  m move to…  d delete  ${LIST_KEYS}  ? help`,
+  mcp: `a add  e edit  c copy to…  d delete  space on/off  ${LIST_KEYS}  ? help`,
+  plugin: `i install  space on/off  U update  x uninstall  m marketplaces  ${LIST_KEYS}  ? help`,
+  health: `${LIST_KEYS}  ? help`,
+  prompt: "↑↓ choose  enter next  esc cancel  ? help",
+  editor: "ctrl+s review & save  esc discard  ? help",
+  mcpForm: "tab next field  space toggle  ←→ change  enter review changes  esc cancel  ? help",
+  review: "enter apply  esc back  ? help",
+  marketplaces: "a add  d remove  esc back  ? help",
+  projects: "space mark  d delete Claude Code data of marked or highlighted  enter open  esc keep current project  ? help",
 }
 
 interface AppProps {
@@ -65,8 +67,11 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
     setFilterState(next)
   }
   const [showHelp, setShowHelp] = useState(false)
+  const { width } = useTerminalDimensions()
+  const ruleWidth = Math.max(1, width - LEFT_COLUMN_WIDTH - 4) // the left column, the right panel's two borders and its two padding cells
   const detected = useDetected(adapters, roots)
   const listing = useListing(adapters, roots, view.tab === "health" ? "memory" : view.tab, reloads)
+  const usage = useUsage(listing.items, view.tab, roots)
   const { tab, focus, harnessIndex } = view
   const harness = adapters[harnessIndex - 1]
   const byHarness = harness ? listing.items.filter((item) => matchesHarness(item, harness.id)) : listing.items
@@ -99,6 +104,14 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
     context.back()
     setReloads((count) => count + 1)
   }
+  const undo = () =>
+    undoLast(dirname(backupRoot)).then(
+      (text) => {
+        setMessage({ text, error: false })
+        setReloads((count) => count + 1)
+      },
+      (error: Error) => setMessage({ text: error.message, error: true }),
+    )
   // The shell keys come first; an action key that they do not handle goes to the list.
   const shellKeys = {
     filterNow, // read live: a key can arrive before the filter's render
@@ -106,18 +119,20 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
     closeHelp: () => setShowHelp(false),
     setFilter,
     openHelp: () => setShowHelp(true),
+    undo,
     onQuit,
   }
   useKeyboard((key) => {
     setMessage(NO_MESSAGE)
     if (screen.name !== "list") return
     if (handleShellKey(key, shellKeys)) return
+    const name = key.shift && key.name.length === 1 ? key.name.toUpperCase() : key.name
     if (tab === "health") {
-      if (KIND_KEYS[key.name] || key.name === "tab") dispatch({ name: key.name, harnessCount: adapters.length, listLength: 0 })
+      if (KIND_KEYS[name] || name === "tab") dispatch({ name, harnessCount: adapters.length, listLength: 0 })
     }
-    else if (!runAction(key.name, { kind: tab, item: selectedItem, context, start })) {
-      dispatch({ name: key.name, harnessCount: adapters.length, listLength: visible.length })
-      if (key.name === "p") start(projectList(context))
+    else if (!runAction(name, { kind: tab, item: selectedItem, context, start })) {
+      dispatch({ name, harnessCount: adapters.length, listLength: visible.length })
+      if (name === "p") start(projectList(context))
     }
   })
 
@@ -133,28 +148,28 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
         </box>
       ) : (
         <box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden" backgroundColor={theme.bg}>
-          <box width={30} flexDirection="column" flexShrink={0}>
+          <box width={LEFT_COLUMN_WIDTH} flexGrow={1} flexDirection="column" flexShrink={0}>
             <box {...sidePanelBorder({ title: " Agents ", height: adapters.length + 3, focused: focus === "agents" })}>
               <AgentsPane agents={agentsOf(adapters, detected, listing.items)} selected={harnessIndex} />
             </box>
-            <box {...sidePanelBorder({ title: " Project ", height: 4, focused: false })}>
+            <box {...sidePanelBorder({ title: " Project ", focused: false, grow: true })}>
               <text wrapMode="none">{` ▸ ${basename(roots.project)}`}</text>
               <text fg={DIM} wrapMode="none">{" p switch  P delete"}</text>
             </box>
           </box>
-          <box flexGrow={1} flexDirection="column" overflow="hidden">
-            <box flexGrow={1} flexShrink={1} flexDirection="column" border borderStyle="rounded" borderColor={focus === "list" ? theme.borderActive : theme.border} title={` ${tabTitle(tab)} `} titleColor={DIM} overflow="hidden">
+          <box flexGrow={1} flexDirection="column" border borderStyle="rounded" borderColor={focus === "list" ? theme.borderActive : theme.border} title={` ${panelTitle(tab, listing.items.length)} `} titleColor={DIM} overflow="hidden">
+            <box flexGrow={1} flexDirection="column" overflow="hidden">
               {tab === "health" ? (
                 <text fg={DIM}> No issues.</text>
               ) : listing.error ? (
                 <text fg={theme.err}>{listing.error}</text>
               ) : (
-                <ItemList kind={tab} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} projectPath={roots.project} />
+                <ItemList kind={tab} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} projectPath={roots.project} usage={usage} />
               )}
             </box>
             {tab !== "health" && (
-              <box height={8} flexShrink={0} flexDirection="column" overflow="hidden">
-                <text fg={theme.border} wrapMode="none">{" " + "─".repeat(120)}</text>
+              <box flexShrink={0} flexDirection="column" paddingLeft={1} paddingRight={1} overflow="hidden">
+                <text fg={theme.border} wrapMode="none">{"─".repeat(ruleWidth)}</text>
                 <DetailPane item={selectedItem} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
               </box>
             )}
@@ -163,7 +178,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
       )}
       {message.text && <text flexShrink={0} fg={message.error ? theme.err : theme.ok}>{` ${message.text}`}</text>}
       {(filter.active || filter.text) && <text flexShrink={0} fg={ACCENT}>{` filter: ${filter.text}${filter.active ? "▌" : ""}`}</text>}
-      <text flexShrink={0} fg={DIM}>{` ${STATUS[screen.name === "list" ? tab : screen.name]}`}</text>
+      <text flexShrink={0} fg={DIM}>{` ${fitKeys(STATUS[screen.name === "list" ? tab : screen.name]!, width)}`}</text>
     </box>
   )
 }
@@ -245,16 +260,18 @@ interface ShellKeyHandlers {
   closeHelp: () => void
   setFilter: (next: typeof NO_FILTER) => void
   openHelp: () => void
+  undo: () => void
   onQuit: () => void
 }
 
 // Keys that belong to the shell rather than the list; returns false when the list handles them.
-function handleShellKey(key: { name: string; sequence?: string }, shell: ShellKeyHandlers): boolean {
+function handleShellKey(key: { name: string; sequence?: string; shift?: boolean }, shell: ShellKeyHandlers): boolean {
   const typed = key.sequence ?? key.name
   if (shell.help) shell.closeHelp()
   else if (shell.filterNow.current.active) shell.setFilter(filterKey(shell.filterNow.current, key.name, typed))
   else if (typed === "/") shell.setFilter({ text: "", active: true })
   else if (typed === "?") shell.openHelp()
+  else if (key.name === "u" && !key.shift) shell.undo()
   else if (key.name === "escape") shell.setFilter(NO_FILTER)
   else if (key.name === "q") shell.onQuit()
   else return false
@@ -398,14 +415,35 @@ function tabCounts(adapters: HarnessAdapter[], roots: Roots, reloads: number): n
 }
 
 function tabTitle(tab: Tab): string {
-  return { memory: "Memory", skill: "Skills", mcp: "MCP", plugin: "Plugins", health: "Health" }[tab]
+  return { memory: "Memory", skill: "Skills", mcp: "MCP servers", plugin: "Plugins", health: "Health" }[tab]
+}
+
+// The list panel title carries the row count shown in it.
+function panelTitle(tab: Tab, count: number): string {
+  return tab === "health" ? tabTitle(tab) : `${tabTitle(tab)} · ${count}`
 }
 
 const KINDS: Kind[] = ["memory", "skill", "mcp", "plugin"]
+const LEFT_COLUMN_WIDTH = 30
+
+// Keeps the leading key hints that fit in width, always ending with "? help".
+export function fitKeys(text: string, width: number): string {
+  const keys = text.split("  ")
+  const help = keys.pop()!
+  const kept: string[] = []
+  for (const key of keys) {
+    if ([...kept, key, help].join("  ").length + KEY_BAR_PADDING > width) break
+    kept.push(key)
+  }
+  return [...kept, help].join("  ")
+}
+
+const KEY_BAR_PADDING = 1
 
 interface SidePanelProps {
   title: string
-  height: number
+  height?: number
+  grow?: boolean // fills the rest of the left column, so both columns end on the same row
   focused: boolean
 }
 
@@ -413,6 +451,7 @@ interface SidePanelProps {
 function sidePanelBorder(props: SidePanelProps) {
   return {
     height: props.height,
+    flexGrow: props.grow ? 1 : 0,
     flexShrink: 0,
     border: true as const,
     borderStyle: "rounded" as const,
