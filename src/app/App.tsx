@@ -68,7 +68,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   }
   const [showHelp, setShowHelp] = useState(false)
   const { width } = useTerminalDimensions()
-  const ruleWidth = Math.max(1, width - LEFT_COLUMN_WIDTH - 4) // the left column, the right panel's two borders and its two padding cells
+  const ruleWidth = Math.max(1, width - LEFT_COLUMN_WIDTH - 4) // the outer borders, the left column and the list panel's two borders
   const detected = useDetected(adapters, roots)
   const listing = useListing(adapters, roots, view.tab === "health" ? "memory" : view.tab, reloads)
   const usage = useUsage(listing.items, view.tab, roots)
@@ -168,7 +168,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
               )}
             </box>
             {tab !== "health" && (
-              <box flexShrink={0} flexDirection="column" paddingLeft={1} paddingRight={1} overflow="hidden">
+              <box flexShrink={0} flexDirection="column" overflow="hidden">
                 <text fg={theme.border} wrapMode="none">{"─".repeat(ruleWidth)}</text>
                 <DetailPane item={selectedItem} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
               </box>
