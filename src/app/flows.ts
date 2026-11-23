@@ -242,7 +242,7 @@ async function updatePlugin(item: Item, context: FlowContext, flip: boolean): Pr
 
 const PLUGIN_ITEM_ACTIONS: Record<string, (item: Item, context: FlowContext) => Promise<Screen | void>> = {
   space: (item, context) => updatePlugin(item, context, true),
-  u: (item, context) => updatePlugin(item, context, false),
+  U: (item, context) => updatePlugin(item, context, false),
   x: async (item, context) => deleteItem(item, context),
 }
 

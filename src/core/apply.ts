@@ -93,7 +93,7 @@ async function writeEdits(plan: WritePlan): Promise<void> {
   }
 }
 
-async function movePath(from: string, to: string): Promise<void> {
+export async function movePath(from: string, to: string): Promise<void> {
   await mkdir(dirname(to), { recursive: true })
   try {
     await rename(from, to)
@@ -104,7 +104,7 @@ async function movePath(from: string, to: string): Promise<void> {
   }
 }
 
-async function readText(path: string): Promise<string | null> {
+export async function readText(path: string): Promise<string | null> {
   try {
     return await readFile(path, "utf8")
   } catch (error) {
