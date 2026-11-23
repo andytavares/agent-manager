@@ -3,17 +3,23 @@ import { useEffect, useState } from "react"
 import { HARNESS_LABELS, type HarnessAdapter, type Item, type ItemDetail, type McpServer } from "../core/model"
 import { maskSecret } from "../core/registry"
 import { skillChecks } from "../core/skills"
+import { backlinks } from "../memory/entry"
+import { isBrokenLink, knownNames } from "../memory/health"
+import type { AutoEntry } from "../memory/types"
 import { tildePath } from "./ItemList"
 import { ACCENT, DIM, theme } from "./theme"
 
 interface DetailPaneProps {
   item: Item | undefined
+  entry: AutoEntry | undefined // set when the selected row is an auto memory entry
+  siblings: AutoEntry[] // every entry, so its links out and in can be resolved
   adapter: HarnessAdapter | undefined // the adapter of item.harness
   home: string
 }
 
 // The detail strip under the list: title, place and file on one line, the body under it.
-export function DetailPane({ item, adapter, home }: DetailPaneProps) {
+export function DetailPane(props: DetailPaneProps) {
+  const { item, adapter, home } = props
   // The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
   const [loaded, setLoaded] = useState<{ item: Item; detail: ItemDetail } | null>(null)
   const detail = loaded && loaded.item === item ? loaded.detail : null
@@ -29,6 +35,7 @@ export function DetailPane({ item, adapter, home }: DetailPaneProps) {
     }
   }, [item, adapter])
 
+  if (props.entry) return <EntryDetail entry={props.entry} siblings={props.siblings} home={home} />
   if (!item) return <text fg={DIM} wrapMode="none">No item selected</text>
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
@@ -44,6 +51,34 @@ export function DetailPane({ item, adapter, home }: DetailPaneProps) {
     </box>
   )
 }
+
+// Auto memory entry: name, type, index line and start load on one line, then its links out and in.
+function EntryDetail({ entry, siblings, home }: { entry: AutoEntry; siblings: AutoEntry[]; home: string }) {
+  const known = knownNames(siblings)
+  const from = backlinks(siblings, entry)
+  const loadedAtStart = entry.indexLine !== null && !entry.pastLoadLimit
+  return (
+    <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+      <text wrapMode="none">
+        <span fg={ACCENT}>{entry.title}</span>
+        <span fg={DIM}>{` · ${entry.type ?? "-"} · ${indexText(entry)} · loaded at start `}</span>
+        <span fg={loadedAtStart ? theme.ok : theme.err}>{loadedAtStart ? "✓" : "✗"}</span>
+      </text>
+      {entry.description !== "" && <text wrapMode="none">{entry.description}</text>}
+      <text wrapMode="none">
+        <span fg={DIM}>{"Links out: "}</span>
+        {entry.links.length === 0 ? <span fg={DIM}>nothing</span> : null}
+        {entry.links.map((link) => (
+          <span key={link} fg={isBrokenLink(known, link) ? theme.err : ACCENT}>{`[[${link}]] `}</span>
+        ))}
+      </text>
+      <text fg={DIM} wrapMode="none">{`Linked from: ${from.length ? from.map((e) => e.name).join(", ") : "nothing"}`}</text>
+      <Field label="file" value={tildePath(entry.path, home)} />
+    </box>
+  )
+}
+
+const indexText = (entry: AutoEntry) => (entry.indexLine === null ? "not in index" : `index line ${entry.indexLine}`)
 
 // Skill checks per harness that loads or can turn on the skill.
 function checksOf(item: Item, detail: ItemDetail | null): string[] {

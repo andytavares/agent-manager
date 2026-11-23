@@ -1,11 +1,14 @@
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react"
 import { basename, dirname } from "node:path"
+import type { AutoEntry } from "../memory/types"
+import { search } from "../memory/fuzzy"
 import { defaultBackupRoot } from "../core/apply"
 import { undoLast } from "../core/undo"
 import type { HarnessAdapter, HarnessId, Item, Kind, McpServer, ProjectData, Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
 import { DetailPane } from "./DetailPane"
+import { entryItem, useEntries } from "./entries"
 import { addMarketplace, addMemory, deleteItem, deleteProjects, editItem, type FlowContext, type Marketplace, marketplaceList, newSkill, projectList, relocateSkill, removeMarketplace, runMcpAction, runPluginAction, type Screen } from "./flows"
 import { ItemList } from "./ItemList"
 import { Marketplaces } from "./Marketplaces"
@@ -72,12 +75,16 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   const detected = useDetected(adapters, roots)
   const listing = useListing(adapters, roots, view.tab === "health" ? "memory" : view.tab, reloads)
   const usage = useUsage(listing.items, view.tab, roots)
+  const entries = useEntries(roots, reloads)
   const { tab, focus, harnessIndex } = view
   const harness = adapters[harnessIndex - 1]
   const byHarness = harness ? listing.items.filter((item) => matchesHarness(item, harness.id)) : listing.items
-  const visible = byHarness.filter((item) => item.name.toLowerCase().includes(filter.text.toLowerCase()))
-  const selected = Math.min(view.listIndex, visible.length - 1)
-  const selectedItem = visible[selected]
+  const visible = byNameFilter(byHarness, filter.text)
+  const shown = tab === "memory" ? search(filter.text, entries.entries) : []
+  const entryGroup = entries.dir === "" ? entries : { ...entries, entries: shown }
+  const selected = Math.min(view.listIndex, visible.length + entryGroup.entries.length - 1)
+  const selectedEntry = selected >= visible.length ? entryGroup.entries[selected - visible.length] : undefined
+  const selectedItem = selectedEntry ? entryItem(selectedEntry) : visible[selected]
   const fail = (error: Error) => {
     setMessage({ text: error.message, error: true })
     show(LIST)
@@ -131,7 +138,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
       if (KIND_KEYS[name] || name === "tab") dispatch({ name, harnessCount: adapters.length, listLength: 0 })
     }
     else if (!runAction(name, { kind: tab, item: selectedItem, context, start })) {
-      dispatch({ name, harnessCount: adapters.length, listLength: visible.length })
+      dispatch({ name, harnessCount: adapters.length, listLength: visible.length + entryGroup.entries.length })
       if (name === "p") start(projectList(context))
     }
   })
@@ -164,13 +171,13 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
               ) : listing.error ? (
                 <text fg={theme.err}>{listing.error}</text>
               ) : (
-                <ItemList kind={tab} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} projectPath={roots.project} usage={usage} />
+                <ItemList kind={tab} items={visible} selected={selected} harnessIds={adapters.map((a) => a.id)} home={roots.home} transports={listing.transports} projectPath={roots.project} usage={usage} entries={entryGroup} selectedEntry={selected >= visible.length ? selected - visible.length : -1} />
               )}
             </box>
             {tab !== "health" && (
               <box flexShrink={0} flexDirection="column" overflow="hidden">
                 <text fg={theme.border} wrapMode="none">{"─".repeat(ruleWidth)}</text>
-                <DetailPane item={selectedItem} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
+                <DetailPane item={selectedEntry ? undefined : selectedItem} entry={selectedEntry} siblings={entries.entries} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
               </box>
             )}
           </box>
@@ -364,6 +371,11 @@ async function loadListing(adapters: HarnessAdapter[], roots: Roots, kind: Kind)
 
 function matchesHarness(item: Item, id: HarnessId): boolean {
   return item.harness === id || item.loadedBy.includes(id) || (item.offIn?.includes(id) ?? false)
+}
+
+// Every tab but Memory: keep the items whose name holds the filter text.
+function byNameFilter(items: Item[], text: string): Item[] {
+  return items.filter((item) => item.name.toLowerCase().includes(text.toLowerCase()))
 }
 
 function agentsOf(adapters: HarnessAdapter[], detected: boolean[], items: Item[]): AgentsPaneProps["agents"] {

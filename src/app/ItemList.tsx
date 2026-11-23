@@ -1,5 +1,8 @@
 import { dirname } from "node:path"
 import { HARNESS_LABELS, type HarnessId, type Item, type Kind } from "../core/model"
+import type { AutoEntry } from "../memory/types"
+import type { EntriesView } from "./entries"
+import { MemoryEntries } from "./MemoryEntries"
 import { ACCENT, DIM, SELECTED_BG } from "./theme"
 import type { UsageView } from "./usage"
 
@@ -14,10 +17,12 @@ interface ItemListProps {
   transports: Map<Item, string> // MCP transport per item; Item has no transport field
   projectPath: string // the PROJECT group row names the current project
   usage: UsageView // Claude Code transcript counts per item, and the footer naming their range
+  entries: EntriesView // the Memory tab's AUTO MEMORY group
+  selectedEntry: number // index into entries, or -1 when the selected row is an instruction file
 }
 
 // Both scopes at once: the GLOBAL items, then the PROJECT items under a row naming the current project.
-export function ItemList({ kind, items, selected, harnessIds, home, projectPath, usage }: ItemListProps) {
+export function ItemList({ kind, items, selected, harnessIds, home, projectPath, usage, entries, selectedEntry }: ItemListProps) {
   const table = TABLES[kind]
   const context = { harnessIds, home, usage }
   const groups = [
@@ -43,6 +48,7 @@ export function ItemList({ kind, items, selected, harnessIds, home, projectPath,
           ))}
         </box>
       ))}
+      {kind === "memory" && entries.dir !== "" && <MemoryEntries entries={entries.entries} dir={entries.dir} selected={selectedEntry} />}
       {usage.note !== "" && <text fg={DIM} wrapMode="none">{` ${usage.note}`}</text>}
     </box>
   )
@@ -69,7 +75,7 @@ const TABLES: Record<Kind, Table> = {
     row: (item) => [item.name, item.loadedBy.map((id) => SHORT_CODES[id]).join(" ")],
   },
   mcp: {
-    widths: (harnessIds) => [20, 10, ...harnessIds.map(() => MARK_WIDTH), 5, 6],
+    widths: (harnessIds) => [20, 10, ...harnessIds.map(() => MARK_WIDTH), 5, 5],
     header: (harnessIds) => ["NAME", "SOURCE", ...harnessIds.map((id) => SHORT_CODES[id]), "here", "all", "last used"],
     row: (item, { harnessIds, usage }) => [item.name, sourceOf(item), ...harnessIds.map((id) => mark(item, id)), ...usageCounts(item, usage)],
   },
