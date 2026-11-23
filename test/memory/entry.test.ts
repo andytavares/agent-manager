@@ -173,3 +173,9 @@ describe("backlinks", () => {
     expect(files(byFile(entries, "feedback_plain_voice.md"))).toEqual(["feedback_verify_bot.md"])
   })
 })
+
+describe("parseIndex", () => {
+  test("reads an index row that has no description", () => {
+    expect(parseIndex("- [no-desc](no-desc.md)\n")).toEqual([{ line: 1, title: "no-desc", file: "no-desc.md", hook: "" }])
+  })
+})

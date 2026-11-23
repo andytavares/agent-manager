@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { autoMemoryDir } from "../../src/adapters/claude-code"
 import type { HarnessAdapter, Item, ItemDetail, Kind, McpServer, Roots } from "../../src/core/model"
+import { loadEntries } from "../../src/memory/entry"
+import { checkHealth } from "../../src/memory/health"
 import { healthIssues } from "../../src/memory/issues"
 
 const INDEX = "- [Gone](project_gone.md) — the file was deleted\n"
@@ -106,4 +108,13 @@ describe("healthIssues", () => {
     const home = tempHome()
     expect(await healthIssues([], { home, project: join(home, "repo"), env: {} })).toEqual([])
   })
+})
+
+test("an entry without a description is listed in the index by a row that Health accepts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "issues-nodesc-"))
+  writeFileSync(join(dir, "MEMORY.md"), "- [no-desc](no-desc.md)\n")
+  writeFileSync(join(dir, "no-desc.md"), "---\nname: no-desc\n---\n\nBody.\n")
+  const entries = loadEntries(dir)
+  expect(entries[0]!.indexLine).toBe(1)
+  expect(checkHealth(entries, dir, []).filter((issue) => issue.kind === "orphan")).toEqual([])
 })

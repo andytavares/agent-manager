@@ -167,7 +167,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
             </box>
             <box {...sidePanelBorder({ title: " Project ", focused: false, grow: true })}>
               <text wrapMode="none">{` ▸ ${basename(roots.project)}`}</text>
-              <text fg={DIM} wrapMode="none">{" p switch  P delete"}</text>
+              <text fg={DIM} wrapMode="none">{" p switch"}</text>
             </box>
           </box>
           <box flexGrow={1} flexDirection="column" border borderStyle="rounded" borderColor={focus === "list" ? theme.borderActive : theme.border} title={` ${panelTitle(tab, listing.items.length, issues.length)} `} titleColor={DIM} overflow="hidden">

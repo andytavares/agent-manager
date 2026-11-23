@@ -6,7 +6,7 @@ import type { AutoEntry, IndexRow, Kind, Level, MemoryType, Source } from "./typ
 export const INDEX_LINE_LIMIT = 200
 export const INDEX_BYTE_LIMIT = 25_600
 const MEMORY_TYPES: readonly string[] = ["user", "feedback", "project", "reference"]
-const INDEX_LINE = /^- \[(.+?)\]\((.+?)\)\s*[—-]\s*(.*?)\r?$/
+const INDEX_LINE = /^- \[(.+?)\]\(([^)]+)\)(?:\s*[—-]\s*(.*?))?\s*$/
 export const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?/
 export const LINK_PATTERN = /\[\[([^\]]+)\]\]/g
 
@@ -41,7 +41,7 @@ export function parseEntryFrontmatter(text: string): { meta: Meta; valid: boolea
 export function parseIndex(memoryMd: string): IndexRow[] {
   return memoryMd.split("\n").flatMap((text, i) => {
     const m = text.match(INDEX_LINE)
-    return m ? [{ line: i + 1, title: m[1]!, file: m[2]!, hook: m[3]! }] : []
+    return m ? [{ line: i + 1, title: m[1]!, file: m[2]!, hook: m[3] ?? "" }] : []
   })
 }
 

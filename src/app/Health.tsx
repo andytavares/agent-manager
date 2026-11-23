@@ -4,12 +4,11 @@ import { useEffect, useState } from "react"
 import type { HarnessAdapter, HarnessId, Item, McpServer, Roots, WritePlan } from "../core/model"
 import { HARNESS_LABELS } from "../core/model"
 import { listItems, literalSecrets } from "../core/registry"
-import { parseFrontmatter } from "../core/skills"
 import { emptyPlan } from "../core/memory-plan"
-import { FRONTMATTER_PATTERN } from "../memory/entry"
+import { FRONTMATTER_PATTERN, parseEntryFrontmatter } from "../memory/entry"
 import { truncate } from "../memory/format"
 import { healthIssues, type Issue } from "../memory/issues"
-import { editItem, type FlowContext, type Screen } from "./flows"
+import { editItem, type FlowContext, runMcpAction, type Screen } from "./flows"
 import { tildePath } from "./ItemList"
 import { DIM, SELECTED_BG, theme } from "./theme"
 
@@ -66,10 +65,17 @@ interface IssueAction {
 // f, r and e on the highlighted issue; undefined when the key is not an action.
 export function runIssueAction(name: string, action: IssueAction | undefined): Screen | Promise<Screen | void> | undefined {
   if (!action) return undefined
-  if (name === "e") return editItem(itemFor(action.issue, action.items), action.context)
+  if (name === "e") return editIssue(action)
   if (name === "f") return fixIssue(action)
   if (name === "r") return unlinkIssue(action)
   return undefined
+}
+
+// An MCP secret opens that server's form; every other issue opens the file's text editor.
+async function editIssue({ issue, items, context }: IssueAction): Promise<Screen | void> {
+  if (issue.kind !== "mcp-secret") return editItem(itemFor(issue, items), context)
+  const server = (await listItems(context.adapters, "mcp", context.roots)).find((item) => item.path === issue.path)
+  return server ? runMcpAction("e", server, context) : context.notify(`${issue.path} no longer holds an MCP server.`, true)
 }
 
 // The harness's own file for the issue: the listed memory or skill item, else a Claude Code auto memory entry.
@@ -115,10 +121,11 @@ function reviewEdit(path: string, after: string, context: FlowContext): undefine
 
 // An orphan gets its line at the top of MEMORY.md, as a new entry does.
 function indexLine(issue: Issue): string {
-  const { data } = parseFrontmatter(fileText(issue.path))
+  const block = fileText(issue.path).match(FRONTMATTER_PATTERN)?.[1] ?? ""
+  const { meta } = parseEntryFrontmatter(block)
   const file = basename(issue.path)
-  const title = typeof data.name === "string" ? data.name : file.replace(/\.md$/, "")
-  return `- [${title}](${file})${typeof data.description === "string" ? ` — ${data.description}` : ""}`
+  const title = typeof meta.name === "string" ? meta.name : file.replace(/\.md$/, "")
+  return `- [${title}](${file})${typeof meta.description === "string" ? ` — ${meta.description}` : ""}`
 }
 
 const indexPath = (issue: Issue) => join(dirname(issue.path), "MEMORY.md")

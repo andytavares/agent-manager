@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { appendFile, mkdir, rm, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { applyPlan, type ApplyOptions, movePath, readText } from "./apply"
@@ -62,9 +63,11 @@ function hasParts(record: UndoRecord): boolean {
   return edits.length + moves.length + copies.length + removals.length > 0
 }
 
-// The same check the apply makes: a file changed since the record's after-text must stop the undo.
+// The same check the apply makes: a file changed since the record's after-text, or a path the undo would restore into, must stop the undo.
 async function findChanged(record: UndoRecord): Promise<string | null> {
   for (const edit of record.edits) if ((await readText(edit.path)) !== edit.after) return edit.path
+  const restored = [...record.moves.map((move) => move.from), ...record.removals.map((removal) => removal.path)]
+  for (const path of restored) if (existsSync(path)) return path
   return null
 }
 

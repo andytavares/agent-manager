@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { INDEX_BYTE_LIMIT, INDEX_LINE_LIMIT, parseIndex } from "./entry"
+import { INDEX_BYTE_LIMIT, INDEX_LINE_LIMIT, parseIndex, countLines } from "./entry"
 import type { AutoEntry, HealthIssue, Source } from "./types"
 
 const INSTRUCTION_KINDS = ["claude-md", "claude-local-md", "agents-md"]
@@ -41,7 +41,7 @@ function indexBudgetIssues(memoryDir: string): HealthIssue[] {
   const indexPath = join(memoryDir, "MEMORY.md")
   if (!existsSync(indexPath)) return []
   const text = readFileSync(indexPath, "utf8")
-  const lines = text.split("\n").length
+  const lines = countLines(text)
   const bytes = Buffer.byteLength(text)
   if (lines <= INDEX_LINE_LIMIT && bytes <= INDEX_BYTE_LIMIT) return []
   return [{ kind: "over-budget", path: indexPath, detail: `${lines} lines, ${(bytes / 1024).toFixed(1)} KB; only the first ${INDEX_LINE_LIMIT} lines or 25 KB load` }]

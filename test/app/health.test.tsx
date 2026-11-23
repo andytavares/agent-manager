@@ -105,3 +105,19 @@ test("f on the orphan opens the review with the MEMORY.md index line added", asy
     setup.renderer.destroy()
   }
 })
+
+test("f on an orphan whose frontmatter is not valid YAML still opens the review", async () => {
+  writeFileSync(join(memoryDir, "project_capex.md"), "---\nname: project-capex\ndescription: Where: the capex plan lives\n---\n\nBody.\n")
+  const setup = await renderApp()
+  try {
+    await waitForText(setup, "1 Memory")
+    setup.mockInput.pressKey("5")
+    await waitForText(setup, "▲ orphan")
+    setup.mockInput.pressArrow("down")
+    setup.mockInput.pressKey("f")
+    const review = await waitForText(setup, "nothing is written until you press enter")
+    expect(review).toContain("[project-capex](project_capex.md) — Where: the capex plan lives")
+  } finally {
+    setup.renderer.destroy()
+  }
+})

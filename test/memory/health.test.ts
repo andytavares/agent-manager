@@ -110,3 +110,11 @@ describe("health budget", () => {
     expect(issues.some((i) => i.kind === "over-budget" && i.path === index)).toBe(true)
   })
 })
+
+describe("index budget", () => {
+  test("a MEMORY.md of exactly 200 lines with a final newline is within budget", () => {
+    const dir = mkdtempSync(join(tmpdir(), "health-budget-"))
+    writeFileSync(join(dir, "MEMORY.md"), Array.from({ length: 200 }, (_, i) => `- [e${i}](e${i}.md)`).join("\n") + "\n")
+    expect(checkHealth([], dir, []).filter((issue) => issue.kind === "over-budget")).toEqual([])
+  })
+})
