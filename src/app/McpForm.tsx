@@ -1,7 +1,7 @@
 import { useKeyboard } from "@opentui/react"
 import { useEffect, useReducer } from "react"
 import { HARNESS_LABELS, type HarnessAdapter, type HarnessId, type McpServer, type Scope } from "../core/model"
-import { ACCENT, DIM, SELECTED_BG } from "./ItemList"
+import { ACCENT, DIM, SELECTED_BG } from "./theme"
 
 export interface McpTarget {
   harness: HarnessId

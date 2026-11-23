@@ -1,7 +1,7 @@
 import type { TextareaRenderable } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
 import { useRef } from "react"
-import { ACCENT } from "./ItemList"
+import { ACCENT } from "./theme"
 
 interface TextEditorProps {
   title: string

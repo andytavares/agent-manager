@@ -74,7 +74,7 @@ async function waitForText(setup: Setup, text: string): Promise<string> {
 }
 
 async function openMcpTab(setup: Setup) {
-  setup.mockInput.pressKey("2")
+  setup.mockInput.pressKey("3")
   await waitForText(setup, "Authorization: ••••••••") // detail pane of the selected server
 }
 

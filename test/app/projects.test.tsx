@@ -71,7 +71,7 @@ async function waitForText(setup: Setup, text: string): Promise<string> {
 
 async function openProjects(setup: Setup) {
   await waitForText(setup, "● Claude Code") // the picker lists projects of detected harnesses only
-  setup.mockInput.pressKey("s")
+  setup.mockInput.pressKey("p")
   await waitForText(setup, ".claude/projects/-lost")
 }
 
@@ -82,7 +82,7 @@ test("s lists every project; enter on another project shows its items", async ()
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressEnter()
     const frame = await waitForText(setup, "other-notes.md")
-    expect(frame).toContain("project: ~/other")
+    expect(frame).toContain("~/other")
   } finally {
     setup.renderer.destroy()
   }
@@ -94,7 +94,7 @@ test("esc keeps the current project in project scope", async () => {
     await openProjects(setup)
     setup.mockInput.pressEscape()
     const frame = await waitForText(setup, "repo-notes.md")
-    expect(frame).toContain("project: ~/repo")
+    expect(frame).toContain("~/repo")
   } finally {
     setup.renderer.destroy()
   }

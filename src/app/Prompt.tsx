@@ -1,6 +1,6 @@
 import { useKeyboard } from "@opentui/react"
 import { useState } from "react"
-import { ACCENT, DIM } from "./ItemList"
+import { ACCENT, DIM } from "./theme"
 
 // A select when options are given, else a text input.
 export interface PromptStep {

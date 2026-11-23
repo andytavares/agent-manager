@@ -75,7 +75,7 @@ test("the status bar lists the plugin keys", async () => {
   try {
     await openPluginTab(setup)
     const frame = await waitForText(setup, "i install")
-    expect(frame).toContain("i install  space on/off  u update  x uninstall  m marketplaces  s scope")
+    expect(frame).toContain("i install  space on/off  u update  x uninstall  m marketplaces")
   } finally {
     setup.renderer.destroy()
   }

@@ -3,7 +3,8 @@ import { useEffect, useState } from "react"
 import { HARNESS_LABELS, type HarnessAdapter, type Item, type ItemDetail, type McpServer } from "../core/model"
 import { maskSecret } from "../core/registry"
 import { skillChecks } from "../core/skills"
-import { ACCENT, DIM, tildePath } from "./ItemList"
+import { tildePath } from "./ItemList"
+import { ACCENT, DIM, theme } from "./theme"
 
 interface DetailPaneProps {
   item: Item | undefined
@@ -11,6 +12,7 @@ interface DetailPaneProps {
   home: string
 }
 
+// The detail strip under the list: title, place and file on one line, the body under it.
 export function DetailPane({ item, adapter, home }: DetailPaneProps) {
   // The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
   const [loaded, setLoaded] = useState<{ item: Item; detail: ItemDetail } | null>(null)
@@ -27,18 +29,18 @@ export function DetailPane({ item, adapter, home }: DetailPaneProps) {
     }
   }, [item, adapter])
 
-  if (!item) return <text fg={DIM}>No item</text>
+  if (!item) return <text fg={DIM} wrapMode="none">No item selected</text>
   return (
-    <box flexDirection="column" paddingLeft={1}>
-      <text fg={ACCENT}>{item.name}</text>
-      <text fg={DIM}>{`${HARNESS_LABELS[item.harness]} · ${item.scope}`}</text>
-      <text> </text>
+    <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+      <text wrapMode="none">
+        <span fg={ACCENT}>{item.name}</span>
+        <span fg={DIM}>{`  ${HARNESS_LABELS[item.harness]} · ${item.scope}`}</span>
+      </text>
       {detail && <DetailBody detail={detail} />}
-      <text> </text>
       <Field label="file" value={tildePath(item.path, home)} />
       {item.key && <Field label="key" value={item.key} />}
       {item.readOnly && <Field label="read-only" value={item.readOnly} />}
-      {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} fg="#ffaf00">{`! ${warning}`}</text>)}
+      {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} fg={theme.warn} wrapMode="none">{`! ${warning}`}</text>)}
     </box>
   )
 }
@@ -59,9 +61,7 @@ function DetailBody({ detail }: { detail: ItemDetail }) {
       <Field label="state" value={plugin.enabled ? "on" : "off"} />
       {plugin.version && <Field label="version" value={plugin.version} />}
       {plugin.source && <Field label="source" value={plugin.source} />}
-      <text> </text>
-      <text fg={DIM}>{`space ${plugin.enabled ? "disable" : "enable"}`}</text>
-      <text fg={DIM}>u update  x uninstall</text>
+      <text fg={DIM}>{`space ${plugin.enabled ? "disable" : "enable"}  u update  x uninstall`}</text>
     </box>
   )
 }
@@ -86,7 +86,7 @@ function McpFields({ server }: { server: McpServer }) {
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <text>
+    <text wrapMode="none">
       <span fg={DIM}>{label.padEnd(10)}</span>
       {value}
     </text>

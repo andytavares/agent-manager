@@ -1,14 +1,8 @@
 import { dirname } from "node:path"
 import { HARNESS_LABELS, type HarnessId, type Item, type Kind } from "../core/model"
+import { ACCENT, DIM, SELECTED_BG } from "./theme"
 
 export const SHORT_CODES: Record<HarnessId, string> = { "claude-code": "CC", codex: "Cx", opencode: "OC", omp: "omp" }
-export const DIM = "#808080"
-export const ACCENT = "#5fafff"
-export const SELECTED_BG = "#303a4a"
-
-export function tildePath(path: string, home: string): string {
-  return path.startsWith(home) ? `~${path.slice(home.length)}` : path
-}
 
 interface ItemListProps {
   kind: Kind
@@ -17,23 +11,35 @@ interface ItemListProps {
   harnessIds: HarnessId[]
   home: string
   transports: Map<Item, string> // MCP transport per item; Item has no transport field
+  projectPath: string // the PROJECT group row names the current project
 }
 
-export function ItemList({ kind, items, selected, harnessIds, home, transports }: ItemListProps) {
+// Both scopes at once: the GLOBAL items, then the PROJECT items under a row naming the current project.
+export function ItemList({ kind, items, selected, harnessIds, home, transports, projectPath }: ItemListProps) {
   const table = TABLES[kind]
   const context = { harnessIds, home, transports }
+  const groups = [
+    { label: "GLOBAL", items: items.filter((item) => item.scope === "global") },
+    { label: `PROJECT  ${tildePath(projectPath, home)}`, items: items.filter((item) => item.scope !== "global") },
+  ]
+  let index = 0
   return (
-    <box flexDirection="column">
+    <box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <text fg={DIM} wrapMode="none">{cells(table.header(harnessIds), table.widths)}</text>
-      {items.map((item, index) => (
-        <text
-          key={`${item.path}\0${item.key ?? ""}`}
-          wrapMode="none"
-          fg={item.readOnly || !item.loadedBy.includes(item.harness) ? DIM : undefined}
-          bg={index === selected ? SELECTED_BG : undefined}
-        >
-          {cells(table.row(item, context), table.widths)}
-        </text>
+      {groups.map((group) => (
+        <box key={group.label} flexDirection="column">
+          <text fg={ACCENT} wrapMode="none">{group.label}</text>
+          {group.items.map((item) => (
+            <text
+              key={`${item.path}\0${item.key ?? ""}`}
+              wrapMode="none"
+              fg={item.readOnly || !item.loadedBy.includes(item.harness) ? DIM : undefined}
+              bg={index++ === selected ? SELECTED_BG : undefined}
+            >
+              {cells(table.row(item, context), table.widths)}
+            </text>
+          ))}
+        </box>
       ))}
     </box>
   )
@@ -91,4 +97,8 @@ function cells(values: string[], widths: number[]): string {
 function fit(value: string, width: number | undefined): string {
   if (width === undefined) return value
   return value.length < width ? value.padEnd(width) : `${value.slice(0, width - 2)}… `
+}
+
+export function tildePath(path: string, home: string): string {
+  return path.startsWith(home) ? `~${path.slice(home.length)}` : path
 }

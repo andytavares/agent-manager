@@ -234,7 +234,7 @@ test("m on a flagged skill plans a move to the chosen root", async () => {
   }
   const setup = await renderApp()
   try {
-    setup.mockInput.pressKey("3")
+    setup.mockInput.pressKey("2")
     await waitForText(setup, "likely not loaded")
     setup.mockInput.pressKey("m")
     await waitForText(setup, "~/.agents/skills")
@@ -253,7 +253,7 @@ test("the detail pane lists skill checks per harness that loads the skill", asyn
   fakeSkills.skillChecks = (_, folderName) => [`${folderName} ok`]
   const setup = await renderApp()
   try {
-    setup.mockInput.pressKey("3")
+    setup.mockInput.pressKey("2")
     await waitForText(setup, "likely not loaded")
     setup.mockInput.pressArrow("down") // research
     expect(await waitForText(setup, "Claude Code: research ok")).not.toContain("Codex: research ok")

@@ -3,7 +3,8 @@ import { createTwoFilesPatch } from "diff"
 import { useRef, useState } from "react"
 import { applyPlan, StaleFileError } from "../core/apply"
 import type { FileEdit, WritePlan } from "../core/model"
-import { ACCENT, DIM, tildePath } from "./ItemList"
+import { tildePath } from "./ItemList"
+import { ACCENT, DIM } from "./theme"
 
 interface ReviewChangesProps {
   plan: WritePlan
