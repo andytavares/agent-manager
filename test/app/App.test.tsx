@@ -160,9 +160,42 @@ test("a long detail text stays inside its pane and keeps the header visible", as
   }
   const setup = await testRender(<App adapters={[long]} roots={roots} onQuit={() => {}} />, { width: 110, height: 24 })
   try {
-    const frame = await setup.waitForFrame((f) => f.includes("line 3"))
+    const frame = await setup.waitForFrame((f) => f.includes("line 2"))
     expect(frame).toContain("1 Memory")
     expect(frame).toContain("? all keys")
+    expect(frame).toMatch(/CLAUDE\.md\s+Claude Code · global[^\n]*\n[^\n]*~\/\.claude\/CLAUDE\.md[^\n]*\n[^\n]*line 0/)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a path longer than the detail strip wraps whole, with no segment cut", async () => {
+  const segments = ["projects", "workspaces", "agentmanager", "packages", "harnessadapters", "claudecode", "memoryfixtures", "nested", "deeply", "configuration", "instructions", "global", "CLAUDE.md"]
+  const longPath = `/home/u/${segments.join("/")}`
+  const deep: HarnessAdapter = {
+    ...fakeAdapter("claude-code", "Claude Code"),
+    list: async (kind) => (kind === "memory" ? [{ ...items[0]!, path: longPath }] : []),
+  }
+  const setup = await testRender(<App adapters={[deep]} roots={roots} onQuit={() => {}} />, { width: 110, height: 24 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("text of CLAUDE.md"))
+    expect(segments.filter((segment) => !frame.includes(segment))).toEqual([])
+    expect(frame).not.toContain("…")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a long skill name and folder show whole in the Skills list, with nothing cut", async () => {
+  const skill: Item = { kind: "skill", harness: "claude-code", scope: "global", name: "reverse-engineer-anything", path: "/home/u/.claude/skills/team-shared-reverse-tools/reverse-engineer-anything", loadedBy: ["claude-code"] }
+  const skills: HarnessAdapter = { ...fakeAdapter("claude-code", "Claude Code"), list: async (kind) => (kind === "skill" ? [skill] : []) }
+  const setup = await testRender(<App adapters={[skills]} roots={roots} onQuit={() => {}} />, { width: 120, height: 34 })
+  try {
+    await waitForText(setup, "1 Memory")
+    setup.mockInput.pressKey("2")
+    const frame = await waitForText(setup, "SKILL")
+    expect(frame).toMatch(/▌ reverse-engineer-anything\s/)
+    expect(frame).not.toContain("…")
   } finally {
     setup.renderer.destroy()
   }

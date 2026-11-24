@@ -91,6 +91,31 @@ test("the key bar is one line at 100x24", async () => {
   }
 })
 
+test("a deep project path shows in full in the Project panel, and the header shows the full path or only the basename", async () => {
+  const deep: Roots = { home: "/home/u", project: "/home/u/repos/agent-manager/node_modules/@opentui/core/renderables", env: {} }
+  const setup = await testRender(<App adapters={adapters} roots={deep} onQuit={() => {}} />, { width: 120, height: 34 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("switch project"))
+    const header = frame.split("\n")[0]!
+    expect(frame).not.toContain("…")
+    expect(frame).toMatch(/repos\/.*agent-.*manager\/.*node_modules\/.*@opentui\/.*core\/.*renderables/s)
+    expect(header).toContain("renderables")
+    expect(header.includes("~/repos/agent-manager/node_modules/@opentui/core/renderables") || !header.includes("~")).toBe(true)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a short project path shows in full in the header when the header line fits", async () => {
+  const setup = await testRender(<App adapters={adapters} roots={roots} onQuit={() => {}} />, { width: 120, height: 34 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("switch project"))
+    expect(frame.split("\n")[0]).toContain("repo  ~/repo")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
 async function openMcpTab(setup: Awaited<ReturnType<typeof testRender>>): Promise<string> {
   await setup.waitForFrame((f) => f.includes("CLAUDE.md"))
   setup.mockInput.pressKey("3")

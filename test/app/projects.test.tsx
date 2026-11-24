@@ -7,6 +7,7 @@ import { EMPTY_PLAN } from "./fake-skills"
 import type { HarnessAdapter, Roots } from "../../src/core/model"
 
 const { App } = await import("../../src/app/App")
+const { Projects } = await import("../../src/app/Projects")
 
 let home: string
 let roots: Roots
@@ -72,7 +73,7 @@ async function waitForText(setup: Setup, text: string): Promise<string> {
 async function openProjects(setup: Setup) {
   await waitForText(setup, "● Claude Code") // the picker lists projects of detected harnesses only
   setup.mockInput.pressKey("p")
-  await waitForText(setup, ".claude/projects/-lost")
+  await waitForText(setup, "folder unknown")
 }
 
 test("s lists every project; enter on another project shows its items", async () => {
@@ -141,8 +142,8 @@ test("space marks several projects and d deletes them in one review", async () =
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressKey(" ")
     const marked = await waitForText(setup, "2 marked")
-    expect(marked).toContain("● ~/other")
-    expect(marked).toContain("● -lost")
+    expect(marked).toContain("●  ~/other")
+    expect(marked).toContain("●  -lost")
     setup.mockInput.pressKey("d")
     const review = await waitForText(setup, "Review changes")
     expect(review).toContain("~/.claude/projects/-other")
@@ -165,7 +166,7 @@ test("space on a marked project unmarks it", async () => {
     setup.mockInput.pressKey(" ")
     await waitForText(setup, "1 marked")
     setup.mockInput.pressKey(" ")
-    const frame = await waitForText(setup, "  ~/other")
+    const frame = await waitForText(setup, "▌    ~/other")
     expect(frame).not.toContain("1 marked")
   } finally {
     setup.renderer.destroy()
@@ -180,7 +181,7 @@ test("esc on the review goes back to the project list", async () => {
     setup.mockInput.pressKey("d")
     await waitForText(setup, "moved to backup")
     setup.mockInput.pressEscape()
-    await waitForText(setup, ".claude/projects/-lost")
+    await waitForText(setup, "folder unknown")
     expect(existsSync(otherData)).toBe(true)
   } finally {
     setup.renderer.destroy()
@@ -192,10 +193,64 @@ test("a project whose folder is unknown says so, and the title counts projects a
   try {
     await openProjects(setup)
     const frame = await waitForText(setup, "3 projects · 0 marked")
-    expect(frame).toMatch(/-lost +~\/\.claude\/projects\/-lost +folder unknown/)
-    expect(frame).toMatch(/~\/repo +~\/\.claude\/projects\/-repo +● current/)
+    expect(frame).toContain("Claude Code data folders are in ~/.claude/projects/")
+    expect(frame).toMatch(/-lost +-lost +folder unknown/)
+    expect(frame).toMatch(/~\/repo +-repo +● current/)
     setup.mockInput.pressKey(" ")
     await waitForText(setup, "3 projects · 1 marked")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+const LONG_FOLDER = "-Users-dev-repos-customer-billing-reconciliation-service"
+const longProject = { path: "/Users/dev/repos/customer-billing-reconciliation-service", dataDir: `/Users/dev/.claude/projects/${LONG_FOLDER}` }
+
+// The text of the highlighted row's CLAUDE CODE DATA cell, read down its column across the wrapped lines.
+function folderInDataColumn(frame: string): string {
+  const lines = frame.split("\n")
+  const column = lines.find((line) => line.includes("PROJECT"))?.indexOf("CLAUDE") ?? 0
+  const rowLines = lines.filter((line) => line.includes("▌"))
+  return rowLines.map((line) => line.slice(column).match(/^[^\s│]*/)![0]).join("")
+}
+
+function renderProjects(projects: { path?: string; dataDir: string }[], size: { width: number; height: number }) {
+  return testRender(<Projects projects={projects} current={longProject.path} home="/Users/dev" onOpen={() => {}} onDelete={() => {}} onBack={() => {}} />, size)
+}
+
+test("a wide terminal shows a long data folder name on one line, and the footer shows its absolute path", async () => {
+  const setup = await renderProjects([longProject], { width: 160, height: 40 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("Projects"))
+    expect(frame).toContain(LONG_FOLDER)
+    expect(frame).toContain(`data  ${longProject.dataDir}`)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a narrow terminal wraps the data folder name inside its column and cuts nothing", async () => {
+  const setup = await renderProjects([longProject], { width: 80, height: 30 })
+  try {
+    const frame = await setup.waitForFrame((f) => folderInDataColumn(f) === LONG_FOLDER)
+    expect(folderInDataColumn(frame)).toBe(LONG_FOLDER)
+    expect(frame).not.toContain("…")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a list taller than the terminal scrolls so the highlighted last project shows", async () => {
+  const projects = Array.from({ length: 40 }, (_, index) => {
+    const name = `project-${String(index + 1).padStart(2, "0")}`
+    return { path: `/Users/dev/repos/${name}`, dataDir: `/Users/dev/.claude/projects/-Users-dev-repos-${name}` }
+  })
+  const setup = await renderProjects(projects, { width: 80, height: 24 })
+  try {
+    await setup.waitForFrame((f) => f.includes("~/repos/project-01"))
+    Array.from({ length: 39 }).forEach(() => setup.mockInput.pressArrow("down"))
+    const frame = await setup.waitForFrame((f) => f.includes("project-40"))
+    expect(frame).toContain("~/repos/project-40")
   } finally {
     setup.renderer.destroy()
   }

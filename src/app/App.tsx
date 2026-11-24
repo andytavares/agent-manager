@@ -7,7 +7,6 @@ import { defaultBackupRoot } from "../core/apply"
 import { undoLast } from "../core/undo"
 import { HARNESS_LABELS, type HarnessAdapter, type HarnessId, type Item, type Kind, type McpServer, type ProjectData, type Roots } from "../core/model"
 import { listItems, literalSecrets, mergePlans, planChange } from "../core/registry"
-import { shortPath } from "../memory/format"
 import { DetailPane } from "./DetailPane"
 import { Dialog } from "./Dialog"
 import { useEntries } from "./entries"
@@ -178,7 +177,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
 
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg}>
-      <Header project={roots.project} home={roots.home} harness={harnessLabel} wide={layout.left > 0} />
+      <Header project={roots.project} home={roots.home} harness={harnessLabel} width={width} />
       <Tabs tab={tab} counts={tabCounts(adapters, roots, reloads)} issues={issues.length} />
       <text flexShrink={0} fg={theme.faint} wrapMode="none">{"─".repeat(width)}</text>
       <box flexDirection="row" flexGrow={1} flexShrink={1} overflow="hidden">
@@ -196,7 +195,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
           <Help width={Math.min(HELP_WIDTH, width - 4)} />
         </box>
       )}
-      <text flexShrink={0} fg={message.error ? theme.err : theme.ok} wrapMode="none">{` ${message.text}`}</text>
+      <text flexShrink={0} fg={message.error ? theme.err : theme.ok}>{` ${message.text}`}</text>
       <KeyBar groups={keyGroups} width={width} right={keyRight} />
     </box>
   )
@@ -471,21 +470,32 @@ interface HeaderProps {
   project: string
   home: string
   harness: string
-  wide: boolean // the folded layout under 100 columns drops the path and the right-side keys
+  width: number
 }
 
-function Header({ project, home, harness, wide }: HeaderProps) {
-  const place = wide ? `${basename(project)}  ${shortPath(tildePath(project, home), 40)}` : basename(project)
+const HEADER_BRAND = "◆ agent-manager"
+const HEADER_DIVIDER = "  ╱  "
+
+// The full path shows only when the whole header line fits; otherwise the basename stands alone, since the Project panel shows the path.
+function headerPlace({ project, home, harness, width }: HeaderProps, keys: string): string {
+  const full = `${basename(project)}  ${tildePath(project, home)}`
+  const line = `${HEADER_BRAND}${HEADER_DIVIDER}${full}${HEADER_DIVIDER}${harness}`
+  return line.length + keys.length + 2 <= width ? full : basename(project)
+}
+
+function Header(props: HeaderProps) {
+  const keys = props.width >= WIDE_FROM ? "p project  s harness  ? keys" : "? keys"
+  const place = headerPlace(props, keys)
   return (
     <box flexShrink={0} flexDirection="row" justifyContent="space-between" backgroundColor={theme.raised} paddingLeft={1} paddingRight={1}>
-      <text wrapMode="none">
-        <span fg={ACCENT}><b>◆ agent-manager</b></span>
-        <span fg={theme.faint}>{"  ╱  "}</span>
+      <text flexShrink={1}>
+        <span fg={ACCENT}><b>{HEADER_BRAND}</b></span>
+        <span fg={theme.faint}>{HEADER_DIVIDER}</span>
         <span fg={theme.text}>{place}</span>
-        <span fg={theme.faint}>{"  ╱  "}</span>
-        <span fg={DIM}>{harness}</span>
+        <span fg={theme.faint}>{HEADER_DIVIDER}</span>
+        <span fg={DIM}>{props.harness}</span>
       </text>
-      <text wrapMode="none" fg={DIM}>{wide ? "p project  s harness  ? keys" : "? keys"}</text>
+      <text wrapMode="none" flexShrink={0} fg={DIM}>{keys}</text>
     </box>
   )
 }
@@ -635,9 +645,9 @@ function LeftColumn({ harnesses, selected, focused, project, home }: LeftColumnP
       <box {...sidePanelBorder({ title: " Harnesses ", height: harnesses.length + 3, focused })}>
         <HarnessesPane harnesses={harnesses} selected={selected} />
       </box>
-      <box {...sidePanelBorder({ title: " Project ", height: 5, focused: false })}>
-        <text wrapMode="none">{` ▸ ${basename(project)}`}</text>
-        <text fg={DIM} wrapMode="none">{` ${shortPath(tildePath(project, home), LEFT_COLUMN_WIDTH - 4)}`}</text>
+      <box {...sidePanelBorder({ title: " Project ", focused: false })}>
+        <text>{` ▸ ${basename(project)}`}</text>
+        <box paddingLeft={1}><text fg={DIM}>{tildePath(project, home)}</text></box>
         <text wrapMode="none"><span fg={ACCENT}>{" p"}</span><span fg={DIM}>{" switch project"}</span></text>
       </box>
       <box {...sidePanelBorder({ title: " Legend ", grow: true, focused: false })}>

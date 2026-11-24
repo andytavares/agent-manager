@@ -139,3 +139,15 @@ test("removed lines that start with -- still count", async () => {
     setup.renderer.destroy()
   }
 })
+
+test("an edit whose path is longer than 100 characters shows the whole path", async () => {
+  const path = "/repo/node_modules/@opentui/core/renderables/text-buffer/wrapping/word-boundaries/fixtures/long-file-name.md"
+  const { setup } = await render({ ...empty, edits: [{ path, before: "old\n", after: "new\n" }] }, [])
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("Review changes"))
+    expect(frame).not.toContain("/…/")
+    expect(frame).toMatch(/node_modules\/.*@opentui\/.*core\/.*renderables\/.*text-.*buffer\/.*wrapping\/.*word-.*boundaries\/.*fixtures\/.*long-.*file-.*name\.md/s)
+  } finally {
+    setup.renderer.destroy()
+  }
+})

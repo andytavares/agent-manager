@@ -137,3 +137,43 @@ test("the issue detail puts what the fix does in its first three lines", async (
     setup.renderer.destroy()
   }
 })
+
+const SKILL_ISSUE = { kind: "skill" as const, path: "/home/u/.claude/skills/quarterly-capex-review-assistant/SKILL.md", detail: "Claude Code: description is missing" }
+const SECRET_ISSUE = { kind: "mcp-secret" as const, path: "/home/u/projects/finance-dashboard-service/.mcp.json", detail: "GITHUB_TOKEN is a literal value, use ${VAR}" }
+const SKILL_PLACE = "~/.claude/skills/quarterly-capex-review-assistant"
+const SECRET_PLACE = "~/projects/finance-dashboard-service/.mcp.json"
+
+// A wrapped path breaks at "/" and "-", so each piece between them must show somewhere in the frame.
+const missingSegments = (frame: string, path: string) => path.split(/[/-]/).filter((segment) => !frame.includes(segment))
+
+test("issue rows show long skill and MCP config paths in full, wrapped instead of cut", async () => {
+  const { Health, issueId } = await import("../../src/app/Health")
+  const setup = await testRender(<Health issues={[SECRET_ISSUE, SKILL_ISSUE]} selectedId={issueId(SECRET_ISSUE)} layout={{ home: "/home/u", width: 118 }} />, { width: 120, height: 34 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("SKILLS"))
+    expect(frame).not.toContain("…")
+    expect(missingSegments(frame, SKILL_PLACE)).toEqual([])
+    expect(missingSegments(frame, SECRET_PLACE)).toEqual([])
+    expect(frame).toContain("f fix")
+    expect(frame).toContain("e edit")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("the detail strip wraps a config path wider than the strip instead of cutting it", async () => {
+  const { IssueDetail } = await import("../../src/app/Health")
+  const issue = { ...SECRET_ISSUE, path: "/home/u/projects/finance-dashboard-service/environments/production-eu-west/shared-configuration/overrides/.mcp.json" }
+  const setup = await testRender(
+    <box height={10} overflow="hidden">
+      <IssueDetail issue={issue} home="/home/u" />
+    </box>,
+    { width: 100, height: 12 },
+  )
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("Secret in config"))
+    expect(missingSegments(frame, "~/projects/finance-dashboard-service/environments/production-eu-west/shared-configuration/overrides/.mcp.json")).toEqual([])
+  } finally {
+    setup.renderer.destroy()
+  }
+})

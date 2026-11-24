@@ -1,6 +1,7 @@
 import { useKeyboard, useTerminalDimensions } from "@opentui/react"
-import { useRef, useState, type ReactNode } from "react"
+import { useRef, useState } from "react"
 import { pad } from "../memory/format"
+import { Cells, columnWidths, SelectableRow, type Cell, type Column } from "./CellRow"
 import { Dialog } from "./Dialog"
 import { ACCENT, DIM, theme } from "./theme"
 
@@ -103,6 +104,11 @@ function optionName(step: PromptStep | null, value: string): string {
   return step?.options?.find((option) => option.value === value)?.name ?? value
 }
 
+const OPTION_COLUMNS: Column[] = [
+  { header: "", give: "name" },
+  { header: "", give: "note" },
+]
+
 function OptionList({ options, onChoose }: { options: PromptOption[]; onChoose: (value: string) => void }) {
   const cursor = useCursor(options.length)
   useKeyboard((key) => {
@@ -111,25 +117,13 @@ function OptionList({ options, onChoose }: { options: PromptOption[]; onChoose: 
     if (key.name === "return" && chosen) onChoose(chosen.value)
   })
   if (options.length === 0) return <text fg={DIM}>No choices left. Press esc to go back.</text>
-  const nameWidth = Math.max(...options.map((option) => option.name.length)) + 3
+  const cells = options.map((option): Cell[] => [[option.name], [option.description, DIM]])
+  const widths = columnWidths(OPTION_COLUMNS, cells)
   return options.map((option, index) => (
-    <OptionRow key={option.value} selected={index === cursor.index}>
-      {` ${pad(option.name, nameWidth)}`}
-      <span fg={DIM}>{option.description}</span>
-    </OptionRow>
+    <SelectableRow key={option.value} selected={index === cursor.index}>
+      <Cells cells={cells[index]!} columns={OPTION_COLUMNS} widths={widths} />
+    </SelectableRow>
   ))
-}
-
-// The highlighted row of a list: an accent bar and the selection background.
-export function OptionRow({ selected, children }: { selected: boolean; children: ReactNode }) {
-  return (
-    <box flexDirection="row" flexShrink={0} backgroundColor={selected ? theme.selBg : undefined}>
-      <text fg={ACCENT}>{selected ? "▌" : " "}</text>
-      <text wrapMode="none" flexGrow={1}>
-        {children}
-      </text>
-    </box>
-  )
 }
 
 // A ref next to the state, because a key can arrive before the previous key's render.

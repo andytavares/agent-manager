@@ -6,7 +6,6 @@ import { skillChecks } from "../core/skills"
 import { backlinks } from "../memory/entry"
 import { isBrokenLink, knownNames } from "../memory/health"
 import type { AutoEntry } from "../memory/types"
-import { shortPath } from "../memory/format"
 import { tildePath } from "./ItemList"
 import { ACCENT, DIM, theme } from "./theme"
 
@@ -47,13 +46,13 @@ function useDetail(item: Item | undefined, adapter: HarnessAdapter | undefined):
 function ItemDetail({ item, detail, home }: { item: Item; detail: ItemDetail | null; home: string }) {
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <text wrapMode="none">
+      <text flexShrink={0}>
         <span fg={ACCENT}><b>{item.name}</b></span>
         <span fg={DIM}>{`  ${HARNESS_LABELS[item.harness]} · ${item.scope}${stateText(item)}`}</span>
       </text>
-      <text fg={theme.faint} wrapMode="none">{`${shortPath(tildePath(item.path, home), 80)}${item.key ? ` · ${item.key}` : ""}`}</text>
+      <text flexShrink={0} fg={theme.faint}>{`${tildePath(item.path, home)}${item.key ? ` · ${item.key}` : ""}`}</text>
       {item.readOnly && <Field label="read-only" value={item.readOnly} />}
-      {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} fg={theme.warn} wrapMode="none">{`▲ ${warning}`}</text>)}
+      {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} flexShrink={0} fg={theme.warn}>{`▲ ${warning}`}</text>)}
       {detail && <DetailBody detail={detail} />}
     </box>
   )
@@ -79,23 +78,23 @@ function EntryDetail({ entry, siblings, home }: { entry: AutoEntry; siblings: Au
   const broken = entry.links.some((link) => isBrokenLink(known, link))
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <text wrapMode="none">
+      <text flexShrink={0}>
         <span fg={ACCENT}><b>{entry.title}</b></span>
         <span fg={DIM}>{`  ${entry.type ?? "-"} · ${indexText(entry)} · loaded at start `}</span>
         <span fg={loadedAtStart ? theme.ok : theme.err}>{loadedAtStart ? "✓" : "✗"}</span>
       </text>
-      <text fg={theme.faint} wrapMode="none">{shortPath(tildePath(entry.path, home), 80)}</text>
-      {entry.description !== "" && <text wrapMode="none">{entry.description}</text>}
-      <text wrapMode="none">
+      <text flexShrink={0} fg={theme.faint}>{tildePath(entry.path, home)}</text>
+      {entry.description !== "" && <text>{entry.description}</text>}
+      <text>
         <span fg={DIM}>{"links out   "}</span>
         {entry.links.length === 0 ? <span fg={DIM}>nothing</span> : null}
         {entry.links.map((link) => (isBrokenLink(known, link) ? <span key={link} fg={theme.err}>{`[[${link}]] ▲ no such entry  `}</span> : <span key={link} fg={ACCENT}>{`[[${link}]]  `}</span>))}
       </text>
-      <text wrapMode="none">
+      <text>
         <span fg={DIM}>{"linked from "}</span>
         {from.length ? from.map((e) => e.name).join(", ") : <span fg={DIM}>nothing</span>}
       </text>
-      {broken && <text fg={DIM} wrapMode="none">5 open Health to unlink the broken link</text>}
+      {broken && <text fg={DIM}>5 open Health to unlink the broken link</text>}
     </box>
   )
 }
@@ -132,7 +131,7 @@ const ENV_REF = /^\$\{[^}]+\}$/
 // A ${VAR} value is read from the environment, so it shows as is; a literal value is masked.
 function SecretField({ label, name, value }: { label: string; name: string; value: string }) {
   return (
-    <text wrapMode="none">
+    <text>
       <span fg={DIM}>{label.padEnd(10)}</span>
       {`${name} = `}
       {ENV_REF.test(value) ? <span fg={theme.accent2}>{value}</span> : maskSecret(value)}
@@ -143,7 +142,7 @@ function SecretField({ label, name, value }: { label: string; name: string; valu
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <text wrapMode="none">
+    <text flexShrink={0}>
       <span fg={DIM}>{label.padEnd(10)}</span>
       {value}
     </text>
