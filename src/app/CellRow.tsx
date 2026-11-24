@@ -74,3 +74,8 @@ function Highlight({ text, filter }: { text: string; filter: string }) {
     </span>
   )
 }
+
+// The width of a dialog that holds the table: the dialog border and padding (4), the row bar and cell padding (2), less the gap after the last column.
+export function tableDialogWidth(widths: number[]): number {
+  return widths.reduce((sum, width) => sum + width, 0) - GAP + 6
+}

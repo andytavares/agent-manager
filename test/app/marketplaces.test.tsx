@@ -56,3 +56,16 @@ test("Marketplaces without any marketplace says how to add one", async () => {
     setup.renderer.destroy()
   }
 })
+
+test("Marketplaces shows a source longer than 40 characters in full", async () => {
+  const source = "github · acme-corporation/claude-code-plugins-for-the-platform-team"
+  const marketplaces = [{ harness: "claude-code" as const, name: "platform", source, installed: 3 }]
+  const setup = await testRender(<Marketplaces marketplaces={marketplaces} onAdd={() => {}} onRemove={() => {}} onBack={() => {}} />, { width: 120, height: 20 })
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("platform"))
+    expect(frame).toContain(source)
+    expect(frame).toContain("3 plugins")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
