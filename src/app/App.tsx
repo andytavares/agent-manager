@@ -1,4 +1,5 @@
-import { useKeyboard, useTerminalDimensions } from "@opentui/react"
+import { InputRenderable, TextareaRenderable } from "@opentui/core"
+import { useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useMemo, useReducer, useRef, useState, type MutableRefObject, type ReactNode } from "react"
 import { basename, dirname } from "node:path"
 import type { Issue } from "../memory/issues"
@@ -74,6 +75,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   }
   const [showHelp, setShowHelp] = useState(false)
   const { width, height } = useTerminalDimensions()
+  const renderer = useRenderer()
   const layout = shellLayout(width, height)
   const detected = useDetected(adapters, roots)
   const listing = useListing(adapters, roots, view.tab === "health" ? "memory" : view.tab, reloads)
@@ -138,7 +140,7 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   // App registers its key handler before any screen mounts, so it runs first and can stop a key from reaching the screen.
   useKeyboard((key) => {
     setMessage(NO_MESSAGE)
-    if (helpKey(key, { open: showHelp, screen: screen.name, setOpen: setShowHelp })) return key.stopPropagation()
+    if (helpKey(key, { open: showHelp, screen: screen.name, setOpen: setShowHelp, typing: isTyping(renderer.currentFocusedRenderable) })) return key.stopPropagation()
     if (screen.name !== "list") return
     if (handleShellKey(key, shellKeys)) return
     const name = key.shift && key.name.length === 1 ? key.name.toUpperCase() : key.name
@@ -311,14 +313,19 @@ interface HelpState {
   open: boolean
   screen: Screen["name"]
   setOpen: (open: boolean) => void
+  typing: boolean // a text input or text area has focus
 }
 
-// Any key closes Help; ? opens it over a screen other than the list (which opens it itself) and the editor, where ? is text.
+// Any key closes Help; ? opens it over a screen other than the list (which opens it itself), unless a text field has focus, where ? is text.
 function helpKey(key: { name: string; sequence?: string }, help: HelpState): boolean {
   if (help.open) help.setOpen(false)
-  else if ((key.sequence ?? key.name) === "?" && help.screen !== "list" && help.screen !== "editor") help.setOpen(true)
+  else if ((key.sequence ?? key.name) === "?" && help.screen !== "list" && !help.typing) help.setOpen(true)
   else return false
   return true
+}
+
+function isTyping(focused: unknown): boolean {
+  return focused instanceof InputRenderable || focused instanceof TextareaRenderable
 }
 
 const START_VIEW: ViewState = { tab: "memory", focus: "list", harnessIndex: 0, listIndex: 0 }

@@ -239,3 +239,17 @@ test("the edit form names the server and says the edit stays in its file", async
     setup.renderer.destroy()
   }
 })
+
+test("? typed in a form field is text, not the help key", async () => {
+  const setup = await renderApp()
+  try {
+    await openMcpTab(setup)
+    setup.mockInput.pressKey("a")
+    await waitForText(setup, "WRITE TO")
+    await setup.mockInput.typeText("why?")
+    const frame = await waitForText(setup, "why?")
+    expect(frame).not.toContain("Move around")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
