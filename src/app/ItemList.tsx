@@ -132,7 +132,7 @@ function groupRows({ group, filter, draw, entriesDir, width }: GroupRowsProps): 
 function GroupRow({ label, count, width }: { label: string; count: string; width: number }) {
   const rule = Math.max(1, width - label.length - count.length - 4)
   return (
-    <text wrapMode="none">
+    <text>
       <span fg={ACCENT}><b>{` ${label} `}</b></span>
       <span fg={theme.faint}>{"─".repeat(rule)}</span>
       <span fg={DIM}>{` ${count} `}</span>

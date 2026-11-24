@@ -488,14 +488,14 @@ function Header(props: HeaderProps) {
   const place = headerPlace(props, keys)
   return (
     <box flexShrink={0} flexDirection="row" justifyContent="space-between" backgroundColor={theme.raised} paddingLeft={1} paddingRight={1}>
-      <text wrapMode="none">
+      <text flexShrink={1}>
         <span fg={ACCENT}><b>{HEADER_BRAND}</b></span>
         <span fg={theme.faint}>{HEADER_DIVIDER}</span>
         <span fg={theme.text}>{place}</span>
         <span fg={theme.faint}>{HEADER_DIVIDER}</span>
         <span fg={DIM}>{props.harness}</span>
       </text>
-      <text wrapMode="none" fg={DIM}>{keys}</text>
+      <text wrapMode="none" flexShrink={0} fg={DIM}>{keys}</text>
     </box>
   )
 }

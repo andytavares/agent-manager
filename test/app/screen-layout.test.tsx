@@ -296,3 +296,37 @@ test("a harness filter that does not read auto memory hides that group and says 
     rmSync(home, { recursive: true, force: true })
   }
 })
+
+// Long names and paths in every tab; none may be cut with "…" or run past the terminal edge.
+const longItems: Item[] = [
+  memory("rules/customer-billing-reconciliation-guidelines.md", "global", "/home/u/.claude/rules/customer-billing-reconciliation-guidelines.md"),
+  { kind: "skill", harness: "claude-code", scope: "global", name: "quarterly-capex-review-assistant", path: "/home/u/.claude/skills/finance-team-shared/quarterly-capex-review-assistant", loadedBy: ["claude-code"] },
+  { kind: "mcp", harness: "claude-code", scope: "project", name: "finance-dashboard-service", path: "/home/u/repo/services/finance-dashboard-service/.mcp.json", key: "mcpServers.finance-dashboard-service", loadedBy: ["claude-code"] },
+  { kind: "plugin", harness: "claude-code", scope: "global", name: "billing-reconciliation-toolkit@acme-corporation-internal-plugins", path: "/home/u/.claude/plugins/billing-reconciliation-toolkit", loadedBy: ["claude-code"] },
+]
+// The PROJECT group label read down its column, without spaces, rules and borders, across the lines it wraps onto.
+function groupLabel(frame: string): string {
+  const lines = frame.split("\n")
+  const row = lines.findIndex((line) => line.includes("PROJECT  ~/"))
+  const start = lines[row]!.indexOf("PROJECT") - 1
+  return lines.slice(row, row + 3).map((line) => line.slice(start, line.lastIndexOf("│"))).join("").replace(/[\s─]/g, "")
+}
+
+const deepRoots: Roots = { home: "/home/u", project: "/home/u/repos/finance/platform/services/billing/customer-billing-reconciliation-service", env: {} }
+
+test.each([[80, 24], [100, 34], [120, 34]])("no tab cuts a long name or path at %i columns", async (width, height) => {
+  const setup = await testRender(<App adapters={[fakeAdapter("claude-code", longItems)]} roots={deepRoots} onQuit={() => {}} />, { width, height })
+  try {
+    for (const [key, text] of [["1", "customer-billing-reconciliation-guidelines"], ["2", "quarterly-capex-review-assistant"], ["3", "finance-dashboard-service"], ["4", "billing-reconciliation-toolkit"]] as const) {
+      setup.mockInput.pressKey(key)
+      const frame = await waitForText(setup, text)
+      expect(frame).not.toContain("…")
+      expect(frame.split("\n").filter((line) => [...line].length > width)).toEqual([])
+      if (key === "1") expect(groupLabel(frame)).toContain("PROJECT~/repos/finance/platform/services/billing/customer-billing-reconciliation-service")
+      const header = frame.slice(0, frame.indexOf("1 Memory"))
+      for (const part of [/customer-billing-reconciliation-service/, /All\b/, /harnesses/, /\? keys/]) expect(header).toMatch(part)
+    }
+  } finally {
+    setup.renderer.destroy()
+  }
+})
