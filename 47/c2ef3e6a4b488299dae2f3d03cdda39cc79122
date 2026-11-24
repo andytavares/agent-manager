@@ -1,0 +1,19 @@
+test/adapters/opencode.test.ts
+  s_8135a8e578db20::t_b5c7504b12b0ce 233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "47c2ef3e6a4b488299dae2f3d03cdda39cc79122",
+  "prompts": {},
+  "sessions": {
+    "s_8135a8e578db20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f606e684-0212-461b-82c9-75c7acfb2f37",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
