@@ -5,7 +5,6 @@ import { useRef, useState, type ReactNode } from "react"
 import { applyWithUndo } from "../core/undo"
 import { StaleFileError } from "../core/apply"
 import type { FileEdit, WritePlan } from "../core/model"
-import { shortPath } from "../memory/format"
 import { tildePath } from "./ItemList"
 import { ACCENT, DIM, theme } from "./theme"
 
@@ -121,7 +120,7 @@ function EditDiff({ edit, home, mask }: { edit: FileEdit; home: string; mask: (t
   const label = edit.before === null ? "new file" : edit.after === null ? "delete" : "edit"
   return (
     <box flexDirection="column" marginTop={1}>
-      <Line label={label} text={shortPath(tildePath(edit.path, home), 100)} />
+      <Line label={label} text={tildePath(edit.path, home)} />
       <diff
         diff={mask(editPatch(edit))}
         view="unified"
