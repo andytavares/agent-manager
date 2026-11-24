@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test"
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parse } from "@decimalturn/toml-patch"
@@ -166,6 +166,30 @@ test("cache folders Codex cannot name as a plugin are not listed", async () => {
   expect(Object.keys(await byName("plugin")).sort()).toEqual(["github@official", "linear@official", "slack@official"])
 })
 
+// A fake `codex` on PATH that prints `codex plugin list --json` output.
+function fakeCodexPluginList(installed: { pluginId: string; installPolicy: string }[]) {
+  const bin = join(base, "bin")
+  mkdirSync(bin)
+  writeFileSync(join(bin, "codex"), `#!/bin/sh\n[ "$*" = "plugin list --json" ] && echo '${JSON.stringify({ installed, available: [] })}'\n`)
+  chmodSync(join(bin, "codex"), 0o755)
+  roots = { ...roots, env: { ...roots.env, PATH: bin } }
+}
+
+test("plugins Codex installs by default are marked and cannot be uninstalled", async () => {
+  fakeCodexPluginList([
+    { pluginId: "github@official", installPolicy: "INSTALLED_BY_DEFAULT" },
+    { pluginId: "linear@official", installPolicy: "AVAILABLE" },
+  ])
+  const items = await byName("plugin")
+  expect(items["github@official"]?.warnings).toEqual([DEFAULT_PLUGIN_WARNING])
+  expect(items["linear@official"]?.warnings).toBeUndefined()
+  await expect(codex.plan(pluginChange({ op: "delete", item: items["github@official"] }), roots)).rejects.toThrow(
+    `Codex: github@official is ${DEFAULT_PLUGIN_WARNING}`,
+  )
+  const disable = await codex.plan(pluginChange({ op: "update", item: items["github@official"], plugin: { name: "github@official", enabled: false } }), roots)
+  expect(disable.edits).toHaveLength(1)
+})
+
 test("trusted project config wins for plugin enabled", async () => {
   trustProject()
   expect((await byName("plugin"))["github@official"]?.offIn).toEqual(["codex"])
@@ -238,6 +262,7 @@ test("memoryFiles and skillRoots", async () => {
 })
 
 const SESSION_NOTICE = "Start a new Codex session to load this change."
+const DEFAULT_PLUGIN_WARNING = "installed by default: Codex cannot uninstall it"
 const UNTRUSTED_NOTICE = "Codex ignores this file until you trust the project."
 const mcpChange = (fields: Partial<Change> & Pick<Change, "op">): Change => ({ kind: "mcp", target: { harness: "codex", scope: "global" }, ...fields })
 const globalConfig = () => join(codexHome, "config.toml")
