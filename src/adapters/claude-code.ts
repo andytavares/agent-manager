@@ -70,15 +70,21 @@ function existingFiles(root: string, names: string[], fields: Partial<Item> & { 
 
 const projectFolderName = (path: string) => path.replace(/[/.]/g, "-")
 
-function autoMemoryDir(roots: Roots, configDir: string, settings: Json): string {
+function autoMemoryPath(roots: Roots, configDir: string, settings: Json): string {
   const custom = settings.autoMemoryDirectory
   return typeof custom === "string"
     ? custom.replace(/^~(?=\/|$)/, roots.home)
     : join(configDir, "projects", projectFolderName(roots.project), "memory")
 }
 
+// The folder Claude Code keeps this project's auto memory in, after reading its autoMemoryDirectory setting.
+export async function autoMemoryDir(roots: Roots): Promise<string> {
+  const { configDir } = configPaths(roots)
+  return autoMemoryPath(roots, configDir, (await readJson(join(configDir, "settings.json"))) ?? {})
+}
+
 async function autoMemory(roots: Roots, configDir: string, settings: Json): Promise<Item[]> {
-  const dir = autoMemoryDir(roots, configDir, settings)
+  const dir = autoMemoryPath(roots, configDir, settings)
   const state = settings.autoMemoryEnabled === false ? OFF : {}
   return existingFiles(dir, await markdownFiles(dir, ""), { scope: "project", ...state })
 }
@@ -387,7 +393,7 @@ async function plan(change: Change, roots: Roots): Promise<WritePlan> {
   if (change.kind === "plugin") return planPlugin(change, roots)
   if (change.kind !== "memory") throw new Error(`${LABEL}: ${change.kind} changes are not supported yet`)
   const { configDir } = configPaths(roots)
-  const autoDir = autoMemoryDir(roots, configDir, (await readJson(join(configDir, "settings.json"))) ?? {})
+  const autoDir = await autoMemoryDir(roots)
   const item = change.item
   const isAutoEntry = item && !item.readOnly && item.path.startsWith(`${autoDir}/`) && item.path !== join(autoDir, "MEMORY.md")
   if (change.op === "create" && change.target.scope === "project" && memoryPattern(AUTO_MEMORY_ENTRY).test(change.name ?? "")) return planAutoEntry(change, autoDir)

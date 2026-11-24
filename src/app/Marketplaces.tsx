@@ -2,7 +2,7 @@ import { useKeyboard } from "@opentui/react"
 import { useState } from "react"
 import { HARNESS_LABELS } from "../core/model"
 import type { Marketplace } from "./flows"
-import { ACCENT, DIM } from "./ItemList"
+import { ACCENT, DIM } from "./theme"
 
 interface MarketplacesProps {
   marketplaces: Marketplace[]

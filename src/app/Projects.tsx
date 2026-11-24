@@ -2,7 +2,8 @@ import { useKeyboard } from "@opentui/react"
 import { useRef, useState } from "react"
 import { basename } from "node:path"
 import type { ProjectData } from "../core/model"
-import { ACCENT, DIM, tildePath } from "./ItemList"
+import { tildePath } from "./ItemList"
+import { ACCENT, DIM } from "./theme"
 
 interface ProjectsProps {
   projects: ProjectData[]

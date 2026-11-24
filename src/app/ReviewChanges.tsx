@@ -1,9 +1,11 @@
 import { useKeyboard } from "@opentui/react"
 import { createTwoFilesPatch } from "diff"
 import { useRef, useState } from "react"
-import { applyPlan, StaleFileError } from "../core/apply"
+import { applyWithUndo } from "../core/undo"
+import { StaleFileError } from "../core/apply"
 import type { FileEdit, WritePlan } from "../core/model"
-import { ACCENT, DIM, tildePath } from "./ItemList"
+import { tildePath } from "./ItemList"
+import { ACCENT, DIM } from "./theme"
 
 interface ReviewChangesProps {
   plan: WritePlan
@@ -24,7 +26,7 @@ export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBa
     if (key.name === "r") setRevealed(!revealed)
     if (key.name !== "return" || applying.current) return
     applying.current = true
-    applyPlan(plan, { backupRoot }).then(
+    applyWithUndo(plan, { backupRoot }).then(
       ({ backupDir, notices }) => onApplied([`Saved. Backup › ${tildePath(backupDir, home)}`, ...notices].join("  ")),
       (failure: Error) => {
         applying.current = false
@@ -41,6 +43,7 @@ export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBa
         <span fg={DIM}>  nothing is written until you press enter</span>
         {secrets.length > 0 && <span fg={DIM}>{`  r ${revealed ? "hides" : "shows"} secrets`}</span>}
       </text>
+      <text fg={DIM}>{plan.commands.length > 0 ? "u undoes the file changes. Commands that run are not undone." : "u undoes this, even after you quit."}</text>
       {plan.edits.map((edit) => <EditDiff key={edit.path} edit={edit} home={home} mask={mask} />)}
       {plan.moves.map(({ from, to }) => <Line key={from} label="move" text={`${path(from)} → ${path(to)}`} />)}
       {plan.copies.map(({ from, to }) => <Line key={from} label="copy" text={`${path(from)} → ${path(to)}`} />)}

@@ -75,7 +75,7 @@ test("the status bar lists the plugin keys", async () => {
   try {
     await openPluginTab(setup)
     const frame = await waitForText(setup, "i install")
-    expect(frame).toContain("i install  space on/off  u update  x uninstall  m marketplaces  s scope")
+    expect(frame).toContain("i install  space on/off  U update  x uninstall  m marketplaces")
   } finally {
     setup.renderer.destroy()
   }
@@ -114,11 +114,11 @@ test("space plans an update with enabled flipped", async () => {
   }
 })
 
-test("u plans an update with enabled unchanged", async () => {
+test("U plans an update with enabled unchanged", async () => {
   const setup = await renderApp()
   try {
     await openPluginTab(setup)
-    setup.mockInput.pressKey("u")
+    setup.mockInput.pressKey("U")
     await waitForText(setup, "nothing is written")
     expect(changes[0]).toMatchObject({ kind: "plugin", op: "update", item: { name: "github@official" }, plugin: { enabled: true, version: "1.4.2" } })
   } finally {
