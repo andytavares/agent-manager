@@ -6,12 +6,12 @@ import { HARNESS_LABELS } from "../core/model"
 import { listItems, literalSecrets } from "../core/registry"
 import { emptyPlan } from "../core/memory-plan"
 import { FRONTMATTER_PATTERN, parseEntryFrontmatter } from "../memory/entry"
-import { pad, shortPath } from "../memory/format"
 import { healthIssues, type Issue } from "../memory/issues"
+import { Cells, columnWidths, SelectableRow, type Cell, type Column } from "./CellRow"
 import { editItem, type FlowContext, runMcpAction, type Screen } from "./flows"
 import { tildePath } from "./ItemList"
 import { ScrollList } from "./ScrollList"
-import { ACCENT, DIM, SELECTED_BG, theme } from "./theme"
+import { ACCENT, DIM, theme } from "./theme"
 
 const LINK_PATTERN = /\[\[([^\]]+)\]\]/g
 const CODE_SEGMENT = /(```[\s\S]*?```|`[^`]*`)/
@@ -79,11 +79,12 @@ interface HealthProps {
 
 export function Health({ issues, selectedId, layout }: HealthProps) {
   if (issues.length === 0) return <text fg={DIM}> No issues.</text>
+  const widths = columnWidths(ISSUE_COLUMNS, issues.map((issue) => issueCells(issue, layout.home)))
   const rows = GROUPS.flatMap((group) => {
     const found = issues.filter((issue) => ISSUE_TEXT[issue.kind].group === group.id)
     if (found.length === 0) return []
     const head = { id: `group\0${group.id}`, node: <IssueGroupRow label={group.label} color={group.color} count={found.length} width={layout.width} /> }
-    return [head, ...found.map((issue) => ({ id: issueId(issue), node: <IssueRow issue={issue} selected={issueId(issue) === selectedId} layout={layout} /> }))]
+    return [head, ...found.map((issue) => ({ id: issueId(issue), node: <SelectableRow selected={issueId(issue) === selectedId}><Cells cells={issueCells(issue, layout.home)} columns={ISSUE_COLUMNS} widths={widths} /></SelectableRow> }))]
   })
   return <ScrollList rows={rows} selectedId={selectedId} />
 }
@@ -98,44 +99,31 @@ function IssueGroupRow({ label, color, count, width }: { label: string; color: s
   )
 }
 
-const SENTENCE_WIDTH = 50
-const PLACE_WIDTH = 28
-const KEY_WIDTH = 10 // "r unlink" and its gap
+const ISSUE_COLUMNS: Column[] = [
+  { header: "", give: "note" },
+  { header: "", give: "path" },
+  { header: "", give: "fixed" },
+]
 
-function IssueRow({ issue, selected, layout }: { issue: Issue; selected: boolean; layout: HealthProps["layout"] }) {
-  const text = ISSUE_TEXT[issue.kind]
-  // The sentence gives up room first, so the fixing key always shows.
-  const sentenceWidth = Math.max(10, Math.min(SENTENCE_WIDTH, layout.width - PLACE_WIDTH - KEY_WIDTH))
-  const room = Math.max(0, layout.width - sentenceWidth - PLACE_WIDTH - 2)
-  return (
-    <box width={layout.width} flexDirection="row" backgroundColor={selected ? SELECTED_BG : undefined}>
-      <text wrapMode="none">
-        <span fg={ACCENT}>{selected ? "▌" : " "}</span>
-        {` ${pad(text.sentence(issue), sentenceWidth)}`}
-        <span fg={DIM}>{pad(issuePlace(issue, layout.home), PLACE_WIDTH)}</span>
-        <span fg={ACCENT}>{text.key.slice(0, room)}</span>
-      </text>
-    </box>
-  )
-}
+const issueCells = (issue: Issue, home: string): Cell[] => [[ISSUE_TEXT[issue.kind].sentence(issue)], [issuePlace(issue, home), DIM], [ISSUE_TEXT[issue.kind].key, ACCENT]]
 
-// A short location: the file for memory issues, the folder for skills, the config file for secrets.
+// The location: the file for memory issues, the folder for skills, the config file for secrets.
 function issuePlace(issue: Issue, home: string): string {
   if (issue.kind === "dead-index") return `MEMORY.md · ${issue.detail.match(/missing (.+)$/)?.[1] ?? ""}`
-  if (issue.kind === "skill") return shortPath(tildePath(dirname(issue.path), home), PLACE_WIDTH - 1)
-  if (issue.kind === "mcp-secret") return shortPath(tildePath(issue.path, home), PLACE_WIDTH - 1)
+  if (issue.kind === "skill") return tildePath(dirname(issue.path), home)
+  if (issue.kind === "mcp-secret") return tildePath(issue.path, home)
   return basename(issue.path)
 }
 
-// The detail strip for the selected issue: what is wrong, what the fix does, and that nothing is written unreviewed.
+// The detail strip for the selected issue: what is wrong, where, what the fix does, and that nothing is written unreviewed.
 export function IssueDetail({ issue, home }: { issue: Issue | undefined; home: string }) {
   if (!issue) return <text fg={DIM} wrapMode="none"> Nothing to fix.</text>
   const text = ISSUE_TEXT[issue.kind]
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <text wrapMode="none"><span fg={ACCENT}><b>{text.title}</b></span><span fg={DIM}>{`  ${text.sentence(issue)}.`}</span></text>
-      <text wrapMode="none">{`${text.fix} You review it first.`}</text>
-      <text fg={theme.faint} wrapMode="none">{tildePath(issue.path, home)}</text>
+      <text flexShrink={0}><span fg={ACCENT}><b>{text.title}</b></span><span fg={DIM}>{`  ${text.sentence(issue)}.`}</span></text>
+      <text fg={theme.faint} flexShrink={0}>{tildePath(issue.path, home)}</text>
+      <text>{`${text.fix} You review it first.`}</text>
     </box>
   )
 }
