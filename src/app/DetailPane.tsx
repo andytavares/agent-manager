@@ -21,9 +21,15 @@ interface DetailPaneProps {
 // The detail strip under the list: title, place and file on one line, the body under it.
 export function DetailPane(props: DetailPaneProps) {
   const { item, adapter, home } = props
-  // The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
+  const detail = useDetail(item, adapter)
+  if (props.entry) return <EntryDetail entry={props.entry} siblings={props.siblings} home={home} />
+  if (!item) return <text fg={DIM} wrapMode="none"> No item selected</text>
+  return <ItemDetail item={item} detail={detail} home={home} />
+}
+
+// The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
+function useDetail(item: Item | undefined, adapter: HarnessAdapter | undefined): ItemDetail | null {
   const [loaded, setLoaded] = useState<{ item: Item; detail: ItemDetail } | null>(null)
-  const detail = loaded && loaded.item === item ? loaded.detail : null
   useEffect(() => {
     if (!item || !adapter) return
     let live = true
@@ -35,9 +41,10 @@ export function DetailPane(props: DetailPaneProps) {
       live = false
     }
   }, [item, adapter])
+  return loaded && loaded.item === item ? loaded.detail : null
+}
 
-  if (props.entry) return <EntryDetail entry={props.entry} siblings={props.siblings} home={home} />
-  if (!item) return <text fg={DIM} wrapMode="none"> No item selected</text>
+function ItemDetail({ item, detail, home }: { item: Item; detail: ItemDetail | null; home: string }) {
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <text wrapMode="none">
@@ -55,9 +62,13 @@ export function DetailPane(props: DetailPaneProps) {
 // Memory says whether it loads at start; MCP servers and plugins say whether they are on.
 function stateText(item: Item): string {
   const on = item.loadedBy.length > 0
-  if (item.kind === "memory") return ` · loaded at start ${on ? "✓" : "✗"}`
-  if (item.kind === "mcp" || item.kind === "plugin") return on ? " · on ●" : " · off ○"
-  return ""
+  return STATE_TEXT[item.kind]?.[on ? 0 : 1] ?? ""
+}
+
+const STATE_TEXT: Partial<Record<Item["kind"], [string, string]>> = {
+  memory: [" · loaded at start ✓", " · loaded at start ✗"],
+  mcp: [" · on ●", " · off ○"],
+  plugin: [" · on ●", " · off ○"],
 }
 
 // Auto memory entry: title and index line, the description, then its links out and in.
