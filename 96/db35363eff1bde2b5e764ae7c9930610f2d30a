@@ -1,0 +1,24 @@
+src/app/Health.tsx
+  s_b03389a2a19d56::t_839ecf27684390 10,14,82,87,102-106,108,113-114,124-125
+  s_b03389a2a19d56::t_ebff1807e4914e 110,118,126
+test/app/health.test.tsx
+  s_b03389a2a19d56::t_9b8f833b170906 140-163,165,167,170,172-174,176-179
+  s_b03389a2a19d56::t_aaf46780705f6e 164,168-169,171
+  s_b03389a2a19d56::t_bfb6532295dca6 166,175
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "96db35363eff1bde2b5e764ae7c9930610f2d30a",
+  "prompts": {},
+  "sessions": {
+    "s_b03389a2a19d56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec20c517-6e04-4d43-bc55-f60aa0b08378",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
