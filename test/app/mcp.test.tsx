@@ -248,7 +248,31 @@ test("? typed in a form field is text, not the help key", async () => {
     await waitForText(setup, "WRITE TO")
     await setup.mockInput.typeText("why?")
     const frame = await waitForText(setup, "why?")
-    expect(frame).not.toContain("Move around")
+    expect(frame).not.toContain("MOVE AROUND")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("the space key label says whether it turns the selected server on or off", async () => {
+  const setup = await renderApp()
+  try {
+    await openMcpTab(setup)
+    const frame = await waitForText(setup, "space turn")
+    expect(frame).toMatch(/space turn (on|off)\b(?!\/)/)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("enter on an incomplete form says how many fields to fix", async () => {
+  const setup = await renderApp()
+  try {
+    await openMcpTab(setup)
+    setup.mockInput.pressKey("a")
+    await waitForText(setup, "WRITE TO")
+    setup.mockInput.pressEnter()
+    await waitForText(setup, "Fix 2 fields to continue.")
   } finally {
     setup.renderer.destroy()
   }

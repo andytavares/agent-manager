@@ -25,6 +25,7 @@ export interface ListGroup {
   rows: ListRow[]
   total: number // rows before the filter
   auto?: boolean // the AUTO MEMORY group, which ends with the MEMORY.md budget
+  empty: string // what an empty group says when no filter is set
 }
 
 // What read() adds to a row: the MCP transport and secret flag, the plugin version.
@@ -52,12 +53,19 @@ export function listGroups({ kind, items, entries, filter, place }: GroupSource)
   const inAutoMemory = (item: Item) => entries.dir !== "" && item.path.startsWith(`${entries.dir}/`)
   const global = items.filter((item) => item.scope === "global")
   const project = items.filter((item) => item.scope !== "global" && !inAutoMemory(item))
-  const group = (label: string, scoped: Item[]): ListGroup => ({ label, noun: NOUNS[kind], rows: scoped.filter((item) => nameMatches(item, filter)).map(rowOf), total: scoped.length })
+  const group = (label: string, scoped: Item[]): ListGroup => ({ label, noun: NOUNS[kind], rows: scoped.filter((item) => nameMatches(item, filter)).map(rowOf), total: scoped.length, empty: EMPTY_HINTS[kind] })
   const groups = [group("GLOBAL", global), group(`PROJECT  ${place}`, project)]
   if (kind !== "memory" || entries.dir === "") return groups
   const shown = filter ? search(filter, entries.entries) : entries.entries
   const rows = shown.map((entry) => ({ id: entry.path, item: entryItem(entry), entry }))
-  return [...groups, { label: "AUTO MEMORY", noun: ["entry", "entries"], rows, total: entries.entries.length, auto: true }]
+  return [...groups, { label: "AUTO MEMORY", noun: ["entry", "entries"], rows, total: entries.entries.length, auto: true, empty: "No entries yet. Claude Code writes them as it learns." }]
+}
+
+const EMPTY_HINTS: Record<Kind, string> = {
+  memory: "Nothing here yet. Press a to add a file.",
+  skill: "Nothing here yet. Press a to add a skill.",
+  mcp: "Nothing here yet. Press a to add a server.",
+  plugin: "Nothing here yet. Press i to install a plugin.",
 }
 
 export const countText = (count: number, [one, many]: [string, string]) => `${count} ${count === 1 ? one : many}`
@@ -79,10 +87,11 @@ interface ItemListProps {
   filter: string
   context: RowContext
   entriesDir: string
+  note: string // a line under the groups, such as why a group is hidden
 }
 
 // The column header stays put; the group and item rows scroll under it.
-export function ItemList({ kind, groups, selectedId, width, filter, context, entriesDir }: ItemListProps) {
+export function ItemList({ kind, groups, selectedId, width, filter, context, entriesDir, note }: ItemListProps) {
   const table = TABLES[kind]
   const columns = table.columns(context.harnessIds)
   const rows = groups.flatMap((group) => groupRows({ group, filter, draw: (row) => (row.entry ? entryRow(row.entry, width) : <ItemRow cells={table.row(row.item, context)} widths={columns.map((column) => column.width)} filter={filter} width={width} />), entriesDir, width }))
@@ -92,6 +101,7 @@ export function ItemList({ kind, groups, selectedId, width, filter, context, ent
     <box flexDirection="column" flexGrow={1} overflow="hidden">
       <text fg={DIM} wrapMode="none">{`  ${columns.map((column) => pad(column.header, column.width)).join("")}${table.lastHeader}`.slice(0, width)}</text>
       <ScrollList rows={marked} selectedId={selectedId} />
+      {note !== "" && <text fg={DIM} wrapMode="none">{`  ${note}`.slice(0, width)}</text>}
       {context.usage.note !== "" && <text fg={DIM} wrapMode="none">{`  ${context.usage.note}`.slice(0, width)}</text>}
     </box>
   )
@@ -109,7 +119,8 @@ function groupRows({ group, filter, draw, entriesDir, width }: GroupRowsProps): 
   const count = filter ? `${group.rows.length} of ${group.total}` : countText(group.total, group.noun)
   const head = { id: `group\0${group.label}`, node: <GroupRow label={group.label} count={count} width={width} /> }
   const rows = group.rows.map((row) => ({ id: row.id, node: draw(row) }))
-  const empty = filter && group.rows.length === 0 ? [{ id: `empty\0${group.label}`, node: <text fg={DIM} wrapMode="none">{`  No entry matches “${filter}”.`}</text> }] : []
+  const emptyText = filter ? `No entry matches “${filter}”.` : group.empty
+  const empty = group.rows.length === 0 ? [{ id: `empty\0${group.label}`, node: <text fg={DIM} wrapMode="none">{`  ${emptyText}`}</text> }] : []
   const budget = group.auto && !filter ? [{ id: `budget\0${group.label}`, node: budgetRow(entriesDir) }] : []
   return [head, ...rows, ...empty, ...budget]
 }

@@ -86,7 +86,8 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   const harness = adapters[harnessIndex - 1]
   const byHarness = harness ? listing.items.filter((item) => matchesHarness(item, harness.id)) : listing.items
   const healthItems = tab === "health" ? listing.items : [] // the Memory listing when the Health tab reads it
-  const groups = listGroups({ kind: tab === "health" ? "memory" : tab, items: byHarness, entries, filter: filter.text, place: tildePath(roots.project, roots.home) })
+  const hidesAutoMemory = harness !== undefined && harness.id !== "claude-code" && entries.dir !== ""
+  const groups = listGroups({ kind: tab === "health" ? "memory" : tab, items: byHarness, entries: hidesAutoMemory ? { ...entries, dir: "", entries: [] } : entries, filter: filter.text, place: tildePath(roots.project, roots.home) })
   const rows = groups.flatMap((group) => group.rows)
   const selected = clamp(view.listIndex, rows.length - 1)
   const selectedRow = rows[selected]
@@ -145,17 +146,17 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
     if (handleShellKey(key, shellKeys)) return
     const name = key.shift && key.name.length === 1 ? key.name.toUpperCase() : key.name
     if (tab === "health") {
-      if (!runHealthKey(name, { issue: selectedIssue, items: healthItems, context, start })) dispatch({ name, harnessCount: adapters.length, listLength: issues.length })
+      if (!runHealthKey(name, { issue: selectedIssue, items: healthItems, context, start })) dispatch({ name, harnessCount: adapters.length, listLength: issues.length, rail: layout.left > 0 })
     }
     else if (!runAction(name, { kind: tab, item: selectedItem, context, start })) {
-      dispatch({ name, harnessCount: adapters.length, listLength: rows.length })
+      dispatch({ name, harnessCount: adapters.length, listLength: rows.length, rail: layout.left > 0 })
       if (name === "p") start(projectList(context))
     }
   })
 
   const harnessLabel = harness?.label ?? "All harnesses"
   const listPanel = {
-    title: panelTitle({ tab, groups, filter, issues: issues.length, plugins: listing.items }),
+    title: panelTitle({ tab, groups, filter, issues: issues.length, plugins: byHarness }),
     width: width - layout.left,
     stripHeight: layout.strip,
     focused: focus === "list",
@@ -165,15 +166,15 @@ export function App({ adapters, roots: startRoots, backupRoot = defaultBackupRoo
   ) : listing.error ? (
     <text fg={theme.err}>{listing.error}</text>
   ) : (
-    <ItemList kind={tab} groups={groups} selectedId={selectedRow?.id} width={layout.rowWidth} filter={filter.text} entriesDir={entries.dir} context={{ harnessIds: adapters.map((a) => a.id), home: roots.home, project: roots.project, usage, facts: listing.facts, checks: skillChecks(issues) }} />
+    <ItemList kind={tab} groups={groups} selectedId={selectedRow?.id} width={layout.rowWidth} filter={filter.text} entriesDir={entries.dir} note={hidesAutoMemory && tab === "memory" ? `Showing ${harness.label}. Hidden: auto memory is a Claude Code feature.` : ""} context={{ harnessIds: adapters.map((a) => a.id), home: roots.home, project: roots.project, usage, facts: listing.facts, checks: skillChecks(issues) }} />
   )
   const detail = tab === "health" ? (
     <IssueDetail issue={selectedIssue} home={roots.home} />
   ) : (
     <DetailPane item={selectedEntry ? undefined : selectedItem} entry={selectedEntry} siblings={entries.entries} adapter={adapters.find((a) => a.id === selectedItem?.harness)} home={roots.home} />
   )
-  const keyGroups = showHelp ? [[["any key", "close"] as KeyHint]] : screenKeys(screen.name === "list" ? tab : screen.name)
-  const keyRight = showHelp || screen.name !== "list" ? screenRight(screen.name) : tab === "health" ? issueSummary(issues) : `row ${selected + 1} of ${rows.length}`
+  const keyGroups = showHelp ? [[["any key", "close"] as KeyHint]] : listKeys({ screen: screen.name === "list" ? tab : screen.name, filtering: filter.active, harnessFocus: focus === "agents", item: selectedItem })
+  const keyRight = showHelp || screen.name !== "list" ? screenRight(screen.name) : tab === "health" ? issueSummary(issues) : rows.length ? `row ${selected + 1} of ${rows.length}` : ""
 
   return (
     <box flexDirection="column" width="100%" height="100%" backgroundColor={theme.bg}>
@@ -212,6 +213,7 @@ interface KeyPress {
   name: string
   harnessCount: number
   listLength: number
+  rail: boolean // the Harnesses panel is drawn, so tab can focus it
 }
 
 interface ActionTarget {
@@ -390,7 +392,7 @@ function pressKey(view: ViewState, key: KeyPress): ViewState {
   if (tab) return { ...view, tab, listIndex: 0 }
   if (step) return move(view, step, key)
   if (key.name === "s") return { ...view, harnessIndex: (view.harnessIndex + 1) % (key.harnessCount + 1), listIndex: 0 }
-  if (key.name === "tab") return { ...view, focus: view.focus === "list" ? "agents" : "list" }
+  if (key.name === "tab" && key.rail) return { ...view, focus: view.focus === "list" ? "agents" : "list" }
   return view
 }
 
@@ -553,7 +555,25 @@ const TALL_FROM = 30 // under this many rows the detail strip shrinks so the lis
 
 function shellLayout(width: number, height: number) {
   const left = width >= WIDE_FROM ? LEFT_COLUMN_WIDTH : 0
-  return { left, rowWidth: Math.max(1, width - left - 3), strip: width >= WIDE_FROM && height >= TALL_FROM ? 10 : 5 }
+  return { left, rowWidth: Math.max(1, width - left - 3), strip: width < WIDE_FROM ? 3 : height >= TALL_FROM ? 10 : 5 }
+}
+
+const FILTER_KEYS: KeyHint[][] = [[["⏎", "keep filter"], ["esc", "clear"], ["↑↓", "move"]]]
+const HARNESS_KEYS: KeyHint[][] = [[["↑↓", "choose harness"], ["tab", "back to list"], ["s", "next harness"]]]
+
+interface KeySource {
+  screen: string
+  filtering: boolean
+  harnessFocus: boolean
+  item: Item | undefined
+}
+
+// The keys of what has focus; the space label says what it does to the selected item.
+function listKeys({ screen, filtering, harnessFocus, item }: KeySource): KeyHint[][] {
+  if (filtering) return FILTER_KEYS
+  if (harnessFocus && KINDS.includes(screen as Kind)) return HARNESS_KEYS
+  const on = item ? item.loadedBy.includes(item.harness) : true
+  return screenKeys(screen).map((hints) => hints.map(([key, label]): KeyHint => [key, label === "turn on/off" ? (on ? "turn off" : "turn on") : label]))
 }
 
 function screenKeys(name: string): KeyHint[][] {
@@ -583,7 +603,7 @@ function sidePanelBorder(props: SidePanelProps) {
     borderStyle: "rounded" as const,
     borderColor: props.focused ? theme.borderActive : theme.border,
     title: props.title,
-    titleColor: DIM,
+    titleColor: props.focused ? ACCENT : DIM,
     flexDirection: "column" as const,
     overflow: "hidden" as const,
   }

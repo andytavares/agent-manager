@@ -72,7 +72,7 @@ export function McpForm({ title, server, targets, adapters, fixed, onSubmit, onC
       <ServerFields state={state} notes={notes} dispatch={dispatch} />
       <text> </text>
       <WriteTo state={state} fixed={fixed} error={notes.targets} />
-      <text> </text>
+      <text fg={theme.err}>{fixMessage(notes)}</text>
     </Dialog>
   )
 }
@@ -128,6 +128,11 @@ function fieldNotes(state: FormState, server: McpServer): FieldNotes {
   if (state.attempted && !state.values.name.trim()) notes.name = { text: "▲ Name is required", error: true }
   if (state.attempted && !state.targets.some((target) => target.checked)) notes.targets = { text: "▲ Pick at least one harness", error: true }
   return notes
+}
+
+function fixMessage(notes: FieldNotes): string {
+  const count = Object.values(notes).filter((note) => note?.text.startsWith("▲ ") && note.text !== "▲ literal value").length
+  return count ? `▲ Fix ${count} ${count === 1 ? "field" : "fields"} to continue.` : " "
 }
 
 function reduceForm(state: FormState, action: FormAction, rules: FormRules): FormState {

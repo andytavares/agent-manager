@@ -5,6 +5,7 @@ import { useRef, useState, type ReactNode } from "react"
 import { applyWithUndo } from "../core/undo"
 import { StaleFileError } from "../core/apply"
 import type { FileEdit, WritePlan } from "../core/model"
+import { shortPath } from "../memory/format"
 import { tildePath } from "./ItemList"
 import { ACCENT, DIM, theme } from "./theme"
 
@@ -72,9 +73,9 @@ function failureMessage(failure: Error): string {
 }
 
 function planSummary(plan: WritePlan): string {
-  const lines = plan.edits.map(editPatch).flatMap((patch) => patch.split("\n"))
-  const added = lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length
-  const removed = lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length
+  const lines = plan.edits.map(editPatch).flatMap(hunkLines)
+  const added = lines.filter((line) => line.startsWith("+")).length
+  const removed = lines.filter((line) => line.startsWith("-")).length
   const changed = Math.min(added, removed)
   const parts = [
     counted(plan.edits.length, "file edited", "files edited"),
@@ -87,6 +88,12 @@ function planSummary(plan: WritePlan): string {
     counted(plan.commands.length, "command", "commands"),
   ]
   return parts.filter((part) => part !== "").join(" · ")
+}
+
+// The lines after the first @@ header; the --- and +++ file headers come before it.
+function hunkLines(patch: string): string[] {
+  const lines = patch.split("\n")
+  return lines.slice(lines.findIndex((line) => line.startsWith("@@")) + 1)
 }
 
 function counted(count: number, one: string, many: string): string {
@@ -108,7 +115,7 @@ function EditDiff({ edit, home, mask }: { edit: FileEdit; home: string; mask: (t
   const label = edit.before === null ? "new file" : edit.after === null ? "delete" : "edit"
   return (
     <box flexDirection="column" marginTop={1}>
-      <Line label={label} text={tildePath(edit.path, home)} />
+      <Line label={label} text={shortPath(tildePath(edit.path, home), 100)} />
       <diff
         diff={mask(editPatch(edit))}
         view="unified"

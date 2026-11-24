@@ -107,8 +107,10 @@ function OptionList({ options, onChoose }: { options: PromptOption[]; onChoose: 
   const cursor = useCursor(options.length)
   useKeyboard((key) => {
     if (key.name === "up" || key.name === "down") cursor.move(key.name === "up" ? -1 : 1)
-    if (key.name === "return") onChoose(options[cursor.now.current]!.value)
+    const chosen = options[cursor.now.current]
+    if (key.name === "return" && chosen) onChoose(chosen.value)
   })
+  if (options.length === 0) return <text fg={DIM}>No choices left. Press esc to go back.</text>
   const nameWidth = Math.max(...options.map((option) => option.name.length)) + 3
   return options.map((option, index) => (
     <OptionRow key={option.value} selected={index === cursor.index}>

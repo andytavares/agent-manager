@@ -133,12 +133,9 @@ export function IssueDetail({ issue, home }: { issue: Issue | undefined; home: s
   const text = ISSUE_TEXT[issue.kind]
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
-      <text wrapMode="none"><span fg={ACCENT}><b>{text.title}</b></span></text>
+      <text wrapMode="none"><span fg={ACCENT}><b>{text.title}</b></span><span fg={DIM}>{`  ${text.sentence(issue)}.`}</span></text>
+      <text wrapMode="none">{`${text.fix} You review it first.`}</text>
       <text fg={theme.faint} wrapMode="none">{tildePath(issue.path, home)}</text>
-      <text wrapMode="none">{" "}</text>
-      <text wrapMode="none">{`${text.sentence(issue)}.`}</text>
-      <text wrapMode="none">{text.fix}</text>
-      <text fg={DIM} wrapMode="none">You review the change before anything is written.</text>
     </box>
   )
 }

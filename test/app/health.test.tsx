@@ -119,3 +119,21 @@ test("f on an orphan whose frontmatter is not valid YAML still opens the review"
     setup.renderer.destroy()
   }
 })
+
+test("the issue detail puts what the fix does in its first three lines", async () => {
+  const { IssueDetail } = await import("../../src/app/Health")
+  const issue = { kind: "orphan" as const, path: "/home/u/mem/code-owners.md", detail: "not listed in MEMORY.md" }
+  const setup = await testRender(
+    <box height={3} overflow="hidden">
+      <IssueDetail issue={issue} home="/home/u" />
+    </box>,
+    { width: 100, height: 6 },
+  )
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("Not in MEMORY.md"))
+    expect(frame).toContain("f adds its line")
+    expect(frame).toContain("You review it first")
+  } finally {
+    setup.renderer.destroy()
+  }
+})

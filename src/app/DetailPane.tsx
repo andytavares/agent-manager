@@ -44,7 +44,7 @@ export function DetailPane(props: DetailPaneProps) {
         <span fg={ACCENT}><b>{item.name}</b></span>
         <span fg={DIM}>{`  ${HARNESS_LABELS[item.harness]} · ${item.scope}${stateText(item)}`}</span>
       </text>
-      <text fg={theme.faint} wrapMode="none">{`${tildePath(item.path, home)}${item.key ? ` · ${item.key}` : ""}`}</text>
+      <text fg={theme.faint} wrapMode="none">{`${shortPath(tildePath(item.path, home), 80)}${item.key ? ` · ${item.key}` : ""}`}</text>
       {item.readOnly && <Field label="read-only" value={item.readOnly} />}
       {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} fg={theme.warn} wrapMode="none">{`▲ ${warning}`}</text>)}
       {detail && <DetailBody detail={detail} />}

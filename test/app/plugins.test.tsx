@@ -75,7 +75,7 @@ test("the key bar lists the plugin keys", async () => {
   try {
     await openPluginTab(setup)
     const frame = await waitForText(setup, "i install")
-    expect(frame).toContain("i install  space turn on/off  U update  x uninstall  m marketplaces")
+    expect(frame).toContain("i install  space turn off  U update  x uninstall  m marketplaces")
   } finally {
     setup.renderer.destroy()
   }
@@ -186,6 +186,20 @@ test("a plan error shows its message as one line", async () => {
     setup.mockInput.pressKey(" ")
     const frame = await waitForText(setup, "OpenCode 1.x cannot turn a plugin off")
     expect(frame).toContain("i install")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("with a harness filter, the on count matches the on rows shown", async () => {
+  const setup = await renderApp()
+  try {
+    await openPluginTab(setup)
+    setup.mockInput.pressKey("s")
+    setup.mockInput.pressKey("s")
+    const frame = await setup.waitForFrame((f) => /Codex/.test(f.split("\n")[0] ?? ""))
+    const [, on] = frame.match(/plugins? · (\d+) on/) ?? []
+    expect(Number(on)).toBe(frame.split("\n").filter((line) => line.includes("● on")).length)
   } finally {
     setup.renderer.destroy()
   }

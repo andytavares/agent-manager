@@ -128,3 +128,14 @@ test("an apply failure shows its message in the theme error colour", async () =>
     setup.renderer.destroy()
   }
 })
+
+test("removed lines that start with -- still count", async () => {
+  const plan = { ...empty, edits: [{ path: "/tmp/entry.md", before: "---\nname: x\n---\nbody\n", after: "body\n" }] }
+  const { setup } = await render(plan, [])
+  try {
+    const frame = await setup.waitForFrame((f) => f.includes("Review changes"))
+    expect(frame).toContain("3 lines removed")
+  } finally {
+    setup.renderer.destroy()
+  }
+})

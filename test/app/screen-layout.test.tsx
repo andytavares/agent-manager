@@ -211,3 +211,88 @@ test("help over a half-done prompt keeps the prompt, and keys pressed while it i
     setup.renderer.destroy()
   }
 })
+
+test("under 100 columns tab keeps focus on the list, so ↓ moves the row and the harness filter stays", async () => {
+  const { setup, cleanup } = await renderAutoMemory(80, 24)
+  try {
+    await waitForText(setup, "row 1 of")
+    setup.mockInput.pressTab()
+    setup.mockInput.pressArrow("down")
+    const frame = await waitForText(setup, "row 2 of")
+    expect(frame).toContain("All harnesses")
+  } finally {
+    cleanup()
+  }
+})
+
+test("at 80 x 24 the list keeps its column header and the selected row", async () => {
+  const { setup, cleanup } = await renderAutoMemory(80, 24)
+  try {
+    const frame = await waitForText(setup, "row 1 of")
+    expect(frame).toContain("FILE")
+    expect(frame).toMatch(/▌ CLAUDE\.md/)
+  } finally {
+    cleanup()
+  }
+})
+
+test("no line is wider than the terminal at 100 x 24", async () => {
+  const { setup, cleanup } = await renderAutoMemory(100, 24)
+  try {
+    const frame = await waitForText(setup, "row 1 of")
+    expect(frame.split("\n").filter((line) => [...line].length > 100)).toEqual([])
+  } finally {
+    cleanup()
+  }
+})
+
+test("while the filter is typed, the key bar shows the filter keys", async () => {
+  const { setup, cleanup } = await renderAutoMemory(120, 34)
+  try {
+    await waitForText(setup, "row 1 of")
+    setup.mockInput.pressKey("/")
+    const frame = await waitForText(setup, "keep filter")
+    expect(frame).toContain("esc clear")
+  } finally {
+    cleanup()
+  }
+})
+
+test("with the Harnesses panel focused, the key bar shows the panel keys", async () => {
+  const { setup, cleanup } = await renderAutoMemory(120, 34)
+  try {
+    await waitForText(setup, "row 1 of")
+    setup.mockInput.pressTab()
+    const frame = await waitForText(setup, "choose harness")
+    expect(frame).toContain("tab back to list")
+  } finally {
+    cleanup()
+  }
+})
+
+test("an empty group says how to add the first item", async () => {
+  const setup = await testRender(<App adapters={[fakeAdapter("claude-code", [memory("CLAUDE.md", "global", "/home/u/.claude/CLAUDE.md")])]} roots={roots} onQuit={() => {}} />, { width: 120, height: 34 })
+  try {
+    const frame = await waitForText(setup, "Nothing here yet")
+    expect(frame).toContain("a to add")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a harness filter that does not read auto memory hides that group and says why", async () => {
+  const { home, roots: autoRoots, memoryDir } = autoMemoryHome()
+  const items = [memory("MEMORY.md", "project", join(memoryDir, "MEMORY.md"))]
+  const codex: Item = { kind: "memory", harness: "codex", scope: "global", name: "AGENTS.md", path: join(home, ".codex", "AGENTS.md"), loadedBy: ["codex"] }
+  const setup = await testRender(<App adapters={[fakeAdapter("claude-code", items), fakeAdapter("codex", [codex])]} roots={autoRoots} onQuit={() => {}} />, { width: 120, height: 34 })
+  try {
+    await waitForText(setup, "Prefers bun")
+    setup.mockInput.pressKey("s")
+    setup.mockInput.pressKey("s")
+    const frame = await waitForText(setup, "auto memory is a Claude Code feature")
+    expect(frame).not.toContain("Prefers bun")
+  } finally {
+    setup.renderer.destroy()
+    rmSync(home, { recursive: true, force: true })
+  }
+})
