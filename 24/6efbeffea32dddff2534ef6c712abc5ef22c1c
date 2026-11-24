@@ -1,0 +1,30 @@
+src/app/MemoryEntries.tsx
+  s_b03389a2a19d56::t_3a79fb966c00b8 4,6,10-12,15,17-21
+src/app/CellRow.tsx
+  s_b03389a2a19d56::t_123c1cb0205258 48
+  s_b03389a2a19d56::t_ef80d409903c19 1-15,18-47,49,51-76
+  s_b03389a2a19d56::t_74b492afd55c9a 16-17,50
+test/app/cell-row.test.tsx
+  s_b03389a2a19d56::t_e78fe104c043a4 1-38
+  s_b03389a2a19d56::t_2f336eed14ee88 39-55
+src/app/ItemList.tsx
+  s_b03389a2a19d56::t_3a79fb966c00b8 6,8,10,97-103,106,108-109,144,148,154,158,162-170,174,181,211
+test/app/App.test.tsx
+  s_b03389a2a19d56::t_c5a8148fbe6a9c 171-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "246efbeffea32dddff2534ef6c712abc5ef22c1c",
+  "prompts": {},
+  "sessions": {
+    "s_b03389a2a19d56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec20c517-6e04-4d43-bc55-f60aa0b08378",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
