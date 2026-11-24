@@ -20,22 +20,8 @@ interface ReviewChangesProps {
 
 // Nothing is written until enter is pressed on this screen.
 export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBack }: ReviewChangesProps) {
-  const [error, setError] = useState("")
   const [revealed, setRevealed] = useState(false)
-  const applying = useRef(false) // a second enter while the first apply runs must not run the plan again
-  useKeyboard((key) => {
-    if (key.name === "escape" && !applying.current) onBack()
-    if (key.name === "r") setRevealed(!revealed)
-    if (key.name !== "return" || applying.current) return
-    applying.current = true
-    applyWithUndo(plan, { backupRoot }).then(
-      ({ backupDir, notices }) => onApplied([`Saved. Backup › ${tildePath(backupDir, home)}`, ...notices].join("  ")),
-      (failure: Error) => {
-        applying.current = false
-        setError(failureMessage(failure))
-      },
-    )
-  })
+  const error = useApplyKeys({ plan, backupRoot, home, onApplied, onBack }, () => setRevealed(!revealed))
   const path = (value: string) => tildePath(value, home)
   const mask = (text: string) => (revealed ? text : hideSecrets(text, secrets))
   return (
@@ -47,6 +33,26 @@ export function ReviewChanges({ plan, secrets, backupRoot, home, onApplied, onBa
       {error && <text fg={theme.err}>{error}</text>}
     </ScrollPanel>
   )
+}
+
+// enter applies the plan once, esc goes back unless an apply runs, r toggles the secrets; returns the apply error.
+function useApplyKeys({ plan, backupRoot, home, onApplied, onBack }: Omit<ReviewChangesProps, "secrets">, toggleSecrets: () => void): string {
+  const [error, setError] = useState("")
+  const applying = useRef(false) // a second enter while the first apply runs must not run the plan again
+  useKeyboard((key) => {
+    if (key.name === "escape" && !applying.current) onBack()
+    if (key.name === "r") toggleSecrets()
+    if (key.name !== "return" || applying.current) return
+    applying.current = true
+    applyWithUndo(plan, { backupRoot }).then(
+      ({ backupDir, notices }) => onApplied([`Saved. Backup › ${tildePath(backupDir, home)}`, ...notices].join("  ")),
+      (failure: Error) => {
+        applying.current = false
+        setError(failureMessage(failure))
+      },
+    )
+  })
+  return error
 }
 
 // The content keeps its full height (flexShrink 0) and the box scrolls with the arrow keys.
