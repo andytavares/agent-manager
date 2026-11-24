@@ -1,7 +1,9 @@
-import { useKeyboard } from "@opentui/react"
+import { useKeyboard, useTerminalDimensions } from "@opentui/react"
 import { useEffect, useReducer } from "react"
 import { HARNESS_LABELS, type HarnessAdapter, type HarnessId, type McpServer, type Scope } from "../core/model"
-import { ACCENT, DIM, SELECTED_BG } from "./theme"
+import { literalSecrets } from "../core/registry"
+import { Dialog } from "./Dialog"
+import { ACCENT, DIM, theme } from "./theme"
 
 export interface McpTarget {
   harness: HarnessId
@@ -24,7 +26,9 @@ type Values = Record<TextField, string> & { transport: McpServer["transport"]; e
 
 const TRANSPORTS: McpServer["transport"][] = ["stdio", "http", "sse"]
 const LABELS: Record<TextField, string> = { name: "Name", command: "Command", args: "Args", env: "Env", url: "URL", headers: "Headers" }
-const PAIRS_HINT = "KEY=VALUE, KEY2=VALUE2 · ${VAR} keeps a secret out of the file"
+const FORM_WIDTH = 96
+const FIELD_WIDTH = 50
+const LABEL_WIDTH = 12
 
 // Static hint of what a target touches; the review shows the real plan.
 const RESULT_HINTS: Record<HarnessId, Partial<Record<Scope, string>>> = {
@@ -39,6 +43,7 @@ interface FormState {
   targets: McpTarget[]
   focusIndex: number
   submitted: boolean // enter on a form with a name and a checked target
+  attempted: boolean // enter was pressed, so the form marks each bad field
 }
 
 type FormAction = { type: "key"; name: string; shift: boolean } | { type: "input"; field: TextField; value: string }
@@ -52,48 +57,89 @@ interface FormRules {
 // A reducer, so that keys pressed before the next render see the latest state.
 export function McpForm({ title, server, targets, adapters, fixed, onSubmit, onCancel }: McpFormProps) {
   const rules: FormRules = { scopesOf: (harness) => adapters.find((adapter) => adapter.id === harness)?.scopes ?? [], fixed }
-  const [state, dispatch] = useReducer(
-    (current: FormState, action: FormAction) => reduceForm(current, action, rules),
-    { values: valuesOf(server), targets, focusIndex: 0, submitted: false },
-  )
+  const [state, dispatch] = useReducer((current: FormState, action: FormAction) => reduceForm(current, action, rules), {
+    values: valuesOf(server), targets, focusIndex: 0, submitted: false, attempted: false,
+  })
+  const { width } = useTerminalDimensions()
   useEffect(() => {
     if (state.submitted) onSubmit(serverOf(server, state.values), state.targets.filter((target) => target.checked))
   }, [state.submitted])
   useKeyboard((key) => (key.name === "escape" ? onCancel() : dispatch({ type: "key", name: key.name, shift: key.shift })))
+  const notes = fieldNotes(state, server)
+  return (
+    <Dialog title={title} width={Math.min(FORM_WIDTH, width - 4)}>
+      <text> </text>
+      <ServerFields state={state} notes={notes} dispatch={dispatch} />
+      <text> </text>
+      <WriteTo state={state} fixed={fixed} error={notes.targets} />
+      <text fg={theme.err}>{fixMessage(notes)}</text>
+    </Dialog>
+  )
+}
+
+interface FieldNote {
+  text: string
+  error?: boolean
+}
+
+type FieldNotes = Partial<Record<TextField | "targets", FieldNote>>
+
+interface ServerFieldsProps {
+  state: FormState
+  notes: FieldNotes
+  dispatch: (action: FormAction) => void
+}
+
+function ServerFields({ state, notes, dispatch }: ServerFieldsProps) {
   const { values } = state
   const focus = fieldsOf(values.transport, state.targets.length)[state.focusIndex]
   const input = (field: TextField) => (
     <Row key={field} label={LABELS[field]} focused={focus === field}>
-      <input width={60} value={values[field]} focused={focus === field} onInput={(value) => dispatch({ type: "input", field, value })} />
+      <input width={FIELD_WIDTH} value={values[field]} focused={focus === field} backgroundColor={theme.bg} focusedBackgroundColor={theme.selBg} onInput={(value) => dispatch({ type: "input", field, value })} />
+      <Note note={notes[field]} />
     </Row>
   )
   return (
-    <box flexDirection="column" paddingLeft={1}>
-      <text fg={ACCENT}>{title}</text>
-      <text> </text>
+    <>
+      <text fg={DIM}>SERVER</text>
       {input("name")}
-      <Row label="Transport" focused={focus === "transport"}>
+      <Row label="Type" focused={focus === "transport"}>
         <Choices options={TRANSPORTS} selected={values.transport} />
+        <Note note={{ text: "←→ change" }} />
       </Row>
       {values.transport === "stdio" ? [input("command"), input("args"), input("env")] : [input("url"), input("headers")]}
-      <text fg={DIM}>{`             ${PAIRS_HINT}`}</text>
+      <text fg={DIM}>
+        {`${" ".repeat(LABEL_WIDTH + 1)}Write `}
+        <span fg={theme.accent2}>{"${VAR}"}</span>
+        {" to keep a secret out of the file."}
+      </text>
       <Row label="Enabled" focused={focus === "enabled"}>
-        <text>{values.enabled ? "[x]" : "[ ]"}</text>
+        <text>{values.enabled ? "[x] on" : "[ ] off"}</text>
       </Row>
-      <text> </text>
-      <text fg={DIM}>{`  ${"WRITE TO".padEnd(18)}${"SCOPE".padEnd(10)}RESULT`}</text>
-      {state.targets.map((target, index) => (
-        <TargetRow key={target.harness} target={target} focused={focus === `target:${index}`} />
-      ))}
-    </box>
+    </>
   )
+}
+
+// After enter, a missing name or harness is an error; a literal secret is always flagged.
+function fieldNotes(state: FormState, server: McpServer): FieldNotes {
+  const pairsField = state.values.transport === "stdio" ? "env" : "headers"
+  const pairsNote = literalSecrets(serverOf(server, state.values)).length ? { text: "▲ literal value", error: true } : { text: "KEY=VALUE, comma separated" }
+  const notes: FieldNotes = { [pairsField]: pairsNote }
+  if (state.attempted && !state.values.name.trim()) notes.name = { text: "▲ Name is required", error: true }
+  if (state.attempted && !state.targets.some((target) => target.checked)) notes.targets = { text: "▲ Pick at least one harness", error: true }
+  return notes
+}
+
+function fixMessage(notes: FieldNotes): string {
+  const count = Object.values(notes).filter((note) => note?.text.startsWith("▲ ") && note.text !== "▲ literal value").length
+  return count ? `▲ Fix ${count} ${count === 1 ? "field" : "fields"} to continue.` : " "
 }
 
 function reduceForm(state: FormState, action: FormAction, rules: FormRules): FormState {
   if (action.type === "input") return { ...state, values: { ...state.values, [action.field]: action.value } }
   const fieldCount = fieldsOf(state.values.transport, state.targets.length).length
   if (action.name === "tab") return { ...state, focusIndex: (state.focusIndex + (action.shift ? -1 : 1) + fieldCount) % fieldCount }
-  if (action.name === "return") return { ...state, submitted: Boolean(state.values.name.trim()) && state.targets.some((target) => target.checked) }
+  if (action.name === "return") return { ...state, attempted: true, submitted: Boolean(state.values.name.trim()) && state.targets.some((target) => target.checked) }
   if (action.name === "space" || action.name === "left" || action.name === "right") return changeFocused(state, action.name, rules)
   return state
 }
@@ -162,20 +208,26 @@ function parsePairs(text: string): Record<string, string> | undefined {
   return pairs.length ? Object.fromEntries(pairs) : undefined
 }
 
+// The focused field's label gets the accent bar.
 function Row({ label, focused, children }: { label: string; focused: boolean; children: React.ReactNode }) {
   return (
     <box flexDirection="row">
-      <text fg={focused ? ACCENT : DIM}>{` ${label.padEnd(12)}`}</text>
+      <text fg={ACCENT}>{focused ? "▌" : " "}</text>
+      <text fg={focused ? theme.text : DIM}>{label.padEnd(LABEL_WIDTH)}</text>
       {children}
     </box>
   )
+}
+
+function Note({ note }: { note?: FieldNote }) {
+  return note ? <text fg={note.error ? theme.err : DIM}>{`  ${note.text}`}</text> : null
 }
 
 function Choices({ options, selected }: { options: string[]; selected: string }) {
   return (
     <text>
       {options.map((option) => (
-        <span key={option} fg={option === selected ? undefined : DIM} bg={option === selected ? SELECTED_BG : undefined}>
+        <span key={option} fg={option === selected ? theme.bg : DIM} bg={option === selected ? ACCENT : undefined}>
           {` ${option} `}
         </span>
       ))}
@@ -183,12 +235,31 @@ function Choices({ options, selected }: { options: string[]; selected: string })
   )
 }
 
-function TargetRow({ target, focused }: { target: McpTarget; focused: boolean }) {
+function WriteTo({ state, fixed, error }: { state: FormState; fixed?: boolean; error?: FieldNote }) {
+  const focus = fieldsOf(state.values.transport, state.targets.length)[state.focusIndex]
+  return (
+    <>
+      <text fg={DIM}>
+        {"WRITE TO  "}
+        {fixed ? "an edit stays in its file" : error && <span fg={theme.err}>{error.text}</span>}
+      </text>
+      {state.targets.map((target, index) => (
+        <TargetRow key={target.harness} target={target} focused={focus === `target:${index}`} fixed={fixed} />
+      ))}
+    </>
+  )
+}
+
+// ‹ › show that ←→ change the scope; a fixed target cannot change it.
+function TargetRow({ target, focused, fixed }: { target: McpTarget; focused: boolean; fixed?: boolean }) {
   const scope = target.scope[0]!.toUpperCase() + target.scope.slice(1)
   return (
-    <text bg={focused ? SELECTED_BG : undefined}>
-      {`  ${target.checked ? "[x]" : "[ ]"} ${HARNESS_LABELS[target.harness].padEnd(14)}${scope.padEnd(10)}`}
-      <span fg={DIM}>{RESULT_HINTS[target.harness][target.scope] ?? ""}</span>
-    </text>
+    <box flexDirection="row" backgroundColor={focused ? theme.selBg : undefined}>
+      <text fg={ACCENT}>{focused ? "▌" : " "}</text>
+      <text>
+        {`  ${target.checked ? "[x]" : "[ ]"} ${HARNESS_LABELS[target.harness].padEnd(14)}${(fixed ? `${scope}  ` : `‹ ${scope} ›`).padEnd(12)}`}
+        <span fg={DIM}>{RESULT_HINTS[target.harness][target.scope] ?? ""}</span>
+      </text>
+    </box>
   )
 }

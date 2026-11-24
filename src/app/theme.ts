@@ -15,6 +15,8 @@ export const theme = {
   err: "#f7768e",
   selBg: "#1b3a33",
   selFg: "#ffffff",
+  addBg: "#14301f",
+  delBg: "#3a1820",
 } as const
 
 export const ACCENT = theme.accent

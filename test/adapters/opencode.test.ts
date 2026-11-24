@@ -230,7 +230,7 @@ test("skillRoots lists every scanned root; env opt-outs drop the .claude roots",
     { path: join(v2.project, ".agents/skills"), scope: "project" },
   ]
   expect(await opencode.skillRoots(v2)).toEqual(all)
-  const withoutClaude = all.filter((root) => !root.path.includes(".claude"))
+  const withoutClaude = all.filter((root) => !root.path.endsWith("/.claude/skills"))
   for (const name of ["OPENCODE_DISABLE_CLAUDE_CODE", "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS"]) {
     expect(await opencode.skillRoots(roots("v2", { [name]: "1" }))).toEqual(withoutClaude)
   }

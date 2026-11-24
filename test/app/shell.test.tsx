@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { testRender } from "@opentui/react/test-utils"
-import { App, fitKeys } from "../../src/app/App"
+import { App } from "../../src/app/App"
 import type { HarnessAdapter, HarnessId, Item, ItemDetail, Roots } from "../../src/core/model"
 
 const roots: Roots = { home: "/home/u", project: "/home/u/repo", env: {} }
@@ -30,9 +30,9 @@ function fakeAdapter(id: HarnessId, label: string): HarnessAdapter {
 }
 
 const adapters = [fakeAdapter("claude-code", "Claude Code"), fakeAdapter("codex", "Codex")]
-const LEFT_COLUMN_RIGHT = 30 // the Agents and Project panels' right edge at 100 columns
+const LEFT_COLUMN_RIGHT = 27 // the left column panels' right edge at 100 columns
 
-test("the list screen shows the tabs, the Agents and Project panels and a GLOBAL group row", async () => {
+test("the list screen shows the tabs, the Harnesses and Project panels and a GLOBAL group row", async () => {
   const setup = await testRender(<App adapters={adapters} roots={roots} onQuit={() => {}} />, { width: 100, height: 24 })
   try {
     const frame = await setup.waitForFrame((f) => f.includes("CLAUDE.md"))
@@ -41,7 +41,7 @@ test("the list screen shows the tabs, the Agents and Project panels and a GLOBAL
     expect(frame).toContain("3 MCP")
     expect(frame).toContain("4 Plugins")
     expect(frame).toContain("5 Health")
-    expect(frame).toContain("Agents")
+    expect(frame).toContain("Harnesses")
     expect(frame).toContain("Project")
     expect(frame).toContain("GLOBAL")
   } finally {
@@ -67,7 +67,7 @@ test("the MCP screen at 100x24 keeps every line within the width and the detail 
     const frame = await openMcpTab(setup)
     expect(frame.split("\n").filter((line) => [...line].length > 100)).toEqual([])
     expect(frame).toContain("3 MCP 1")
-    expect(frame).toMatch(/All\s+1/)
+    expect(frame).toMatch(/All harnesses\s+1/)
     expect(frame).toMatch(/Claude Code\s+0/)
     expect(frame).toMatch(/Codex\s+1/)
     assertStripInPanel(frame.split("\n").filter((line) => line !== ""))
@@ -81,20 +81,14 @@ test("the key bar is one line at 100x24", async () => {
   try {
     const frame = await setup.waitForFrame((f) => f.includes("CLAUDE.md"))
     const lines = frame.split("\n").filter((line) => line !== "")
-    // The bar sits directly above the bottom border; a wrapped bar pushes its tail onto that row.
-    const bar = lines.at(-2)!
+    // The bar is the last row; a wrapped bar would push its head onto the row above.
+    const bar = lines.at(-1)!
     expect(bar).toContain("a add")
-    expect(bar).toContain("? help")
-    expect(bar.indexOf("? help")).toBeGreaterThan(bar.indexOf("d delete"))
+    expect(bar).toContain("? all keys")
+    expect(bar.indexOf("? all keys")).toBeGreaterThan(bar.indexOf("d delete"))
   } finally {
     setup.renderer.destroy()
   }
-})
-
-test("fitKeys keeps the keys that fit, ends with ? help and drops the rest", () => {
-  expect(fitKeys("a add  d delete  q quit  ? help", 100)).toBe("a add  d delete  q quit  ? help")
-  expect(fitKeys("a add  e edit  d delete  q quit  ? help", 30)).toBe("a add  e edit  ? help")
-  expect(fitKeys("? help", 4)).toBe("? help")
 })
 
 async function openMcpTab(setup: Awaited<ReturnType<typeof testRender>>): Promise<string> {
@@ -103,7 +97,7 @@ async function openMcpTab(setup: Awaited<ReturnType<typeof testRender>>): Promis
   return waitForText(setup, "MCP servers · 1")
 }
 
-// The detail strip and its rule sit inside the list panel, and both columns end on the same row.
+// The detail strip and its dashed rule sit inside the list panel, and both columns end on the same row.
 function assertStripInPanel(lines: string[]) {
   // The list panel's top row runs from its top-left corner to its top-right corner.
   const panel = lines.find((line) => line.includes("MCP servers"))
@@ -119,7 +113,7 @@ function assertStripInPanel(lines: string[]) {
   expect(detail.length).toBeGreaterThan(0)
   expect(detail.filter((line) => !opened.includes(line))).toEqual([])
 
-  const rule = lines.find((line) => [...line][left] === "│" && /^─+$/.test([...line].slice(left + 1, right).join("")))
+  const rule = lines.find((line) => [...line][left] === "│" && /^┄+$/.test([...line].slice(left + 1, right).join("")))
   expect(rule).toBeDefined()
   expect([...rule!].slice(left + 1, right).join("").length).toBe(right - left - 1)
 

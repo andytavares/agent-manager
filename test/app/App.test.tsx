@@ -41,6 +41,18 @@ async function renderApp(onQuit = () => {}) {
   return testRender(<App adapters={adapters} roots={roots} onQuit={onQuit} />, { width: 110, height: 24 })
 }
 
+// Key presses reach React state a little later, so retry the frame check.
+async function waitForText(setup: Awaited<ReturnType<typeof renderApp>>, text: string): Promise<string> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await setup.waitForFrame((frame) => frame.includes(text))
+    } catch (error) {
+      if (attempt === 200) throw error
+      await Bun.sleep(10)
+    }
+  }
+}
+
 // A lone escape is delivered after a short delay, so poll until the frame shows text.
 async function pressEscapeUntil(setup: Awaited<ReturnType<typeof renderApp>>, text: string): Promise<string> {
   setup.mockInput.pressEscape()
@@ -58,7 +70,7 @@ test("pressing 3 lists the MCP servers of both scopes", async () => {
   try {
     await setup.waitForFrame((frame) => frame.includes("CLAUDE.md"))
     setup.mockInput.pressKey("3")
-    const frame = await setup.waitForFrame((f) => f.includes("playwright") && f.includes("type      http"))
+    const frame = await setup.waitForFrame((f) => f.includes("playwright") && f.includes("url       https://mcp.linear.app/mcp"))
     expect(frame).toContain("linear")
     expect(frame).toContain("postgres")
   } finally {
@@ -83,12 +95,12 @@ test("p opens the project picker; esc keeps the current project and the list sho
   }
 })
 
-test("selecting an agent filters the list", async () => {
+test("selecting a harness filters the list", async () => {
   const setup = await renderApp()
   try {
     setup.mockInput.pressKey("3")
     await setup.waitForFrame((f) => f.includes("playwright"))
-    setup.mockInput.pressTab() // focus moves from the list to the Agents panel
+    setup.mockInput.pressTab() // focus moves from the list to the Harnesses panel
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressArrow("down") // Codex
     const frame = await setup.waitForFrame((f) => !f.includes("mcpServers.linear"))
@@ -98,16 +110,16 @@ test("selecting an agent filters the list", async () => {
   }
 })
 
-test("s cycles the agent filter from All to each adapter", async () => {
+test("s cycles the harness filter from All to each adapter", async () => {
   const setup = await renderApp()
   try {
     setup.mockInput.pressKey("3")
     await setup.waitForFrame((f) => f.includes("playwright"))
     setup.mockInput.pressKey("s") // All → Claude Code
-    const claude = await setup.waitForFrame((f) => !f.includes("mcpServers.playwright"))
-    expect(claude).toContain("All agents")
+    const claude = await waitForText(setup, "╱  Claude Code")
+    expect(claude).not.toContain("playwright")
     setup.mockInput.pressKey("s") // Claude Code → Codex
-    const codex = await setup.waitForFrame((f) => f.includes("Codex · s agent"))
+    const codex = await waitForText(setup, "╱  Codex")
     expect(codex).toContain("playwright")
     expect(codex).not.toContain("mcpServers.linear")
   } finally {
@@ -150,7 +162,7 @@ test("a long detail text stays inside its pane and keeps the header visible", as
   try {
     const frame = await setup.waitForFrame((f) => f.includes("line 3"))
     expect(frame).toContain("1 Memory")
-    expect(frame).toContain("q quit")
+    expect(frame).toContain("? all keys")
   } finally {
     setup.renderer.destroy()
   }
@@ -165,12 +177,12 @@ test("/ filters the list by name; esc clears the filter", async () => {
     await setup.mockInput.typeText("play")
     await setup.renderOnce()
     const filtered = setup.captureCharFrame()
-    expect(filtered).toContain("filter: play")
+    expect(filtered).toContain("/ play▌ · 1 of 3")
     expect(filtered).toContain("playwright")
-    expect(filtered).not.toContain("linear              user") // the list row, not the detail pane
-    const cleared = await pressEscapeUntil(setup, "linear              user")
-    expect(cleared).toContain("linear              user")
-    expect(cleared).not.toContain("filter:")
+    expect(filtered).not.toMatch(/linear\s+http/) // the list row, not the detail pane
+    const cleared = await pressEscapeUntil(setup, "3 servers")
+    expect(cleared).toMatch(/linear\s+http/)
+    expect(cleared).not.toContain("/ play")
   } finally {
     setup.renderer.destroy()
   }
@@ -181,7 +193,7 @@ test("? shows the keys for every tab", async () => {
   try {
     await setup.waitForFrame((f) => f.includes("CLAUDE.md"))
     setup.mockInput.pressKey("?")
-    const help = await setup.waitForFrame((f) => f.includes("Keys"))
+    const help = await waitForText(setup, "MOVE AROUND")
     expect(help).toContain("i install")
     expect(help).toContain("c copy to")
   } finally {

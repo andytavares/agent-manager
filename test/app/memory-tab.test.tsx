@@ -97,7 +97,7 @@ async function waitForText(setup: Setup, text: string): Promise<string> {
 
 async function renderMemoryTab() {
   const { home, roots } = autoMemoryHome()
-  const setup = await testRender(<App adapters={adapters} roots={roots} onQuit={() => {}} />, { width: 100, height: 24 })
+  const setup = await testRender(<App adapters={adapters} roots={roots} onQuit={() => {}} />, { width: 120, height: 34 })
   return { setup, cleanup: () => { setup.renderer.destroy(); rmSync(home, { recursive: true, force: true }) } }
 }
 
@@ -109,9 +109,9 @@ test("the Memory tab lists the auto memory entries with their type and flags and
     expect(frame).toContain("Vault secrets runbook")
     expect(frame).toContain("Verify the bot")
     expect(frame).toContain("project-orphan")
-    expect(frame).toContain("not in index")
+    expect(frame).toContain("not in MEMORY.md, not loaded at start")
     expect(frame).toMatch(/feedback\s+Plain voice/)
-    expect(frame).toContain("/ 200 lines")
+    expect(frame).toContain("of 200 lines")
     // The instruction files stay in the groups above the entries.
     expect(frame).toContain("CLAUDE.md")
   } finally {
@@ -125,10 +125,10 @@ test("selecting an entry fills the detail strip with its links out and linked fr
     await waitForText(setup, "AUTO MEMORY")
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressArrow("down")
-    const frame = await waitForText(setup, "Links out")
-    expect(frame).toContain("Plain voice · feedback · index line 1 · loaded at start ✓")
-    expect(frame).toContain("Links out: [[reference_vault]] [[feedback_verify_bot]]")
-    expect(frame).toContain("Linked from: feedback_verify_bot")
+    const frame = await waitForText(setup, "links out")
+    expect(frame).toContain("Plain voice  feedback · MEMORY.md line 1 · loaded at start ✓")
+    expect(frame).toContain("links out   [[reference_vault]]  [[feedback_verify_bot]]")
+    expect(frame).toContain("linked from feedback_verify_bot")
   } finally {
     cleanup()
   }
@@ -140,11 +140,11 @@ test("/ on the Memory tab searches entries by title, name, file and body", async
     await waitForText(setup, "AUTO MEMORY")
     setup.mockInput.pressKey("/")
     await setup.mockInput.typeText("vault")
-    const frame = await waitForText(setup, "Vault secrets runbook · reference")
-    expect(frame).toContain("filter: vault")
+    const frame = await waitForText(setup, "Vault secrets runbook  reference")
+    expect(frame).toContain("/ vault▌")
     // "Verify the bot" matches none of the fields, so the fuzzy search drops it.
     expect(frame).not.toContain("Verify the bot")
-    expect(frame).toContain("index line 2")
+    expect(frame).toContain("MEMORY.md line 2")
   } finally {
     cleanup()
   }

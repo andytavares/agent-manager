@@ -6,6 +6,7 @@ import { skillChecks } from "../core/skills"
 import { backlinks } from "../memory/entry"
 import { isBrokenLink, knownNames } from "../memory/health"
 import type { AutoEntry } from "../memory/types"
+import { shortPath } from "../memory/format"
 import { tildePath } from "./ItemList"
 import { ACCENT, DIM, theme } from "./theme"
 
@@ -20,9 +21,15 @@ interface DetailPaneProps {
 // The detail strip under the list: title, place and file on one line, the body under it.
 export function DetailPane(props: DetailPaneProps) {
   const { item, adapter, home } = props
-  // The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
+  const detail = useDetail(item, adapter)
+  if (props.entry) return <EntryDetail entry={props.entry} siblings={props.siblings} home={home} />
+  if (!item) return <text fg={DIM} wrapMode="none"> No item selected</text>
+  return <ItemDetail item={item} detail={detail} home={home} />
+}
+
+// The detail remembers which item it belongs to, so the previous item's fields are never drawn under a new name.
+function useDetail(item: Item | undefined, adapter: HarnessAdapter | undefined): ItemDetail | null {
   const [loaded, setLoaded] = useState<{ item: Item; detail: ItemDetail } | null>(null)
-  const detail = loaded && loaded.item === item ? loaded.detail : null
   useEffect(() => {
     if (!item || !adapter) return
     let live = true
@@ -34,51 +41,66 @@ export function DetailPane(props: DetailPaneProps) {
       live = false
     }
   }, [item, adapter])
+  return loaded && loaded.item === item ? loaded.detail : null
+}
 
-  if (props.entry) return <EntryDetail entry={props.entry} siblings={props.siblings} home={home} />
-  if (!item) return <text fg={DIM} wrapMode="none">No item selected</text>
+function ItemDetail({ item, detail, home }: { item: Item; detail: ItemDetail | null; home: string }) {
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <text wrapMode="none">
-        <span fg={ACCENT}>{item.name}</span>
-        <span fg={DIM}>{`  ${HARNESS_LABELS[item.harness]} · ${item.scope}`}</span>
+        <span fg={ACCENT}><b>{item.name}</b></span>
+        <span fg={DIM}>{`  ${HARNESS_LABELS[item.harness]} · ${item.scope}${stateText(item)}`}</span>
       </text>
-      {detail && <DetailBody detail={detail} />}
-      <Field label="file" value={tildePath(item.path, home)} />
-      {item.key && <Field label="key" value={item.key} />}
+      <text fg={theme.faint} wrapMode="none">{`${shortPath(tildePath(item.path, home), 80)}${item.key ? ` · ${item.key}` : ""}`}</text>
       {item.readOnly && <Field label="read-only" value={item.readOnly} />}
-      {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} fg={theme.warn} wrapMode="none">{`! ${warning}`}</text>)}
+      {[...(item.warnings ?? []), ...checksOf(item, detail)].map((warning) => <text key={warning} fg={theme.warn} wrapMode="none">{`▲ ${warning}`}</text>)}
+      {detail && <DetailBody detail={detail} />}
     </box>
   )
 }
 
-// Auto memory entry: name, type, index line and start load on one line, then its links out and in.
+// Memory says whether it loads at start; MCP servers and plugins say whether they are on.
+function stateText(item: Item): string {
+  const on = item.loadedBy.length > 0
+  return STATE_TEXT[item.kind]?.[on ? 0 : 1] ?? ""
+}
+
+const STATE_TEXT: Partial<Record<Item["kind"], [string, string]>> = {
+  memory: [" · loaded at start ✓", " · loaded at start ✗"],
+  mcp: [" · on ●", " · off ○"],
+  plugin: [" · on ●", " · off ○"],
+}
+
+// Auto memory entry: title and index line, the description, then its links out and in.
 function EntryDetail({ entry, siblings, home }: { entry: AutoEntry; siblings: AutoEntry[]; home: string }) {
   const known = knownNames(siblings)
   const from = backlinks(siblings, entry)
   const loadedAtStart = entry.indexLine !== null && !entry.pastLoadLimit
+  const broken = entry.links.some((link) => isBrokenLink(known, link))
   return (
     <box flexDirection="column" paddingLeft={1} paddingRight={1}>
       <text wrapMode="none">
-        <span fg={ACCENT}>{entry.title}</span>
-        <span fg={DIM}>{` · ${entry.type ?? "-"} · ${indexText(entry)} · loaded at start `}</span>
+        <span fg={ACCENT}><b>{entry.title}</b></span>
+        <span fg={DIM}>{`  ${entry.type ?? "-"} · ${indexText(entry)} · loaded at start `}</span>
         <span fg={loadedAtStart ? theme.ok : theme.err}>{loadedAtStart ? "✓" : "✗"}</span>
       </text>
+      <text fg={theme.faint} wrapMode="none">{shortPath(tildePath(entry.path, home), 80)}</text>
       {entry.description !== "" && <text wrapMode="none">{entry.description}</text>}
       <text wrapMode="none">
-        <span fg={DIM}>{"Links out: "}</span>
+        <span fg={DIM}>{"links out   "}</span>
         {entry.links.length === 0 ? <span fg={DIM}>nothing</span> : null}
-        {entry.links.map((link) => (
-          <span key={link} fg={isBrokenLink(known, link) ? theme.err : ACCENT}>{`[[${link}]] `}</span>
-        ))}
+        {entry.links.map((link) => (isBrokenLink(known, link) ? <span key={link} fg={theme.err}>{`[[${link}]] ▲ no such entry  `}</span> : <span key={link} fg={ACCENT}>{`[[${link}]]  `}</span>))}
       </text>
-      <text fg={DIM} wrapMode="none">{`Linked from: ${from.length ? from.map((e) => e.name).join(", ") : "nothing"}`}</text>
-      <Field label="file" value={tildePath(entry.path, home)} />
+      <text wrapMode="none">
+        <span fg={DIM}>{"linked from "}</span>
+        {from.length ? from.map((e) => e.name).join(", ") : <span fg={DIM}>nothing</span>}
+      </text>
+      {broken && <text fg={DIM} wrapMode="none">5 open Health to unlink the broken link</text>}
     </box>
   )
 }
 
-const indexText = (entry: AutoEntry) => (entry.indexLine === null ? "not in index" : `index line ${entry.indexLine}`)
+const indexText = (entry: AutoEntry) => (entry.indexLine === null ? "not in MEMORY.md" : `MEMORY.md line ${entry.indexLine}`)
 
 // Skill checks per harness that loads or can turn on the skill.
 function checksOf(item: Item, detail: ItemDetail | null): string[] {
@@ -90,32 +112,32 @@ function checksOf(item: Item, detail: ItemDetail | null): string[] {
 function DetailBody({ detail }: { detail: ItemDetail }) {
   if (detail.type === "text") return <text>{detail.text}</text>
   if (detail.type === "mcp") return <McpFields server={detail.server} />
-  const { plugin } = detail
-  return (
-    <box flexDirection="column">
-      <Field label="state" value={plugin.enabled ? "on" : "off"} />
-      {plugin.version && <Field label="version" value={plugin.version} />}
-      {plugin.source && <Field label="source" value={plugin.source} />}
-      <text fg={DIM}>{`space ${plugin.enabled ? "disable" : "enable"}  U update  x uninstall`}</text>
-    </box>
-  )
+  return <box flexDirection="column">{detail.plugin.version && <Field label="version" value={detail.plugin.version} />}</box>
 }
 
 function McpFields({ server }: { server: McpServer }) {
   const command = [server.command, ...(server.args ?? [])].join(" ")
   return (
     <box flexDirection="column">
-      <Field label="type" value={server.transport} />
       {server.url && <Field label="url" value={server.url} />}
       {server.command && <Field label="command" value={command} />}
-      {Object.entries(server.env ?? {}).map(([name, value]) => (
-        <Field key={name} label="env" value={`${name}=${maskSecret(value)}`} />
-      ))}
-      {Object.entries(server.headers ?? {}).map(([name, value]) => (
-        <Field key={name} label="header" value={`${name}: ${maskSecret(value)}`} />
-      ))}
-      {!server.enabled && <Field label="state" value="off" />}
+      {Object.entries(server.env ?? {}).map(([name, value]) => <SecretField key={name} label="env" name={name} value={value} />)}
+      {Object.entries(server.headers ?? {}).map(([name, value]) => <SecretField key={name} label="header" name={name} value={value} />)}
     </box>
+  )
+}
+
+const ENV_REF = /^\$\{[^}]+\}$/
+
+// A ${VAR} value is read from the environment, so it shows as is; a literal value is masked.
+function SecretField({ label, name, value }: { label: string; name: string; value: string }) {
+  return (
+    <text wrapMode="none">
+      <span fg={DIM}>{label.padEnd(10)}</span>
+      {`${name} = `}
+      {ENV_REF.test(value) ? <span fg={theme.accent2}>{value}</span> : maskSecret(value)}
+      {ENV_REF.test(value) && <span fg={DIM}>{" read from your environment"}</span>}
+    </text>
   )
 }
 

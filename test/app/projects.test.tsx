@@ -144,7 +144,7 @@ test("space marks several projects and d deletes them in one review", async () =
     expect(marked).toContain("● ~/other")
     expect(marked).toContain("● -lost")
     setup.mockInput.pressKey("d")
-    const review = await waitForText(setup, "2 changes")
+    const review = await waitForText(setup, "Review changes")
     expect(review).toContain("~/.claude/projects/-other")
     expect(review).toContain("~/.claude/projects/-lost")
     setup.mockInput.pressEnter()
@@ -182,6 +182,20 @@ test("esc on the review goes back to the project list", async () => {
     setup.mockInput.pressEscape()
     await waitForText(setup, ".claude/projects/-lost")
     expect(existsSync(otherData)).toBe(true)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a project whose folder is unknown says so, and the title counts projects and marks", async () => {
+  const setup = await renderApp()
+  try {
+    await openProjects(setup)
+    const frame = await waitForText(setup, "3 projects · 0 marked")
+    expect(frame).toMatch(/-lost +~\/\.claude\/projects\/-lost +folder unknown/)
+    expect(frame).toMatch(/~\/repo +~\/\.claude\/projects\/-repo +● current/)
+    setup.mockInput.pressKey(" ")
+    await waitForText(setup, "3 projects · 1 marked")
   } finally {
     setup.renderer.destroy()
   }
