@@ -40,16 +40,14 @@ async function waitForText(setup: Setup, text: string): Promise<string> {
   }
 }
 
-test("the MCP tab shows the here, all and last used columns and marks a Claude Code server loaded", async () => {
-  const setup = await testRender(<App adapters={adapters} roots={roots} onQuit={() => {}} />, { width: 100, height: 24 })
+test("the MCP tab shows the here and last used columns and marks a Claude Code server loaded", async () => {
+  const setup = await testRender(<App adapters={adapters} roots={roots} onQuit={() => {}} />, { width: 120, height: 34 })
   try {
     await waitForText(setup, "GLOBAL")
     setup.mockInput.pressKey("3")
     const frame = await waitForText(setup, "github")
-    expect(frame).toContain("here")
-    expect(frame).toContain("all")
-    expect(frame).toContain("last used")
-    expect(frame).toMatch(/github\s+user\s+✓/)
+    expect(frame).toMatch(/SERVER\s+TYPE\s+DEFINED IN\s+CC\s+Cx\s+here\s+last used\s+NOTE/)
+    expect(frame).toMatch(/github\s+~\/\.claude\.json\s+✓/)
   } finally {
     setup.renderer.destroy()
   }

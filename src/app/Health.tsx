@@ -6,13 +6,13 @@ import { HARNESS_LABELS } from "../core/model"
 import { listItems, literalSecrets } from "../core/registry"
 import { emptyPlan } from "../core/memory-plan"
 import { FRONTMATTER_PATTERN, parseEntryFrontmatter } from "../memory/entry"
-import { truncate } from "../memory/format"
+import { pad, shortPath } from "../memory/format"
 import { healthIssues, type Issue } from "../memory/issues"
 import { editItem, type FlowContext, runMcpAction, type Screen } from "./flows"
 import { tildePath } from "./ItemList"
-import { DIM, SELECTED_BG, theme } from "./theme"
+import { ScrollList } from "./ScrollList"
+import { ACCENT, DIM, SELECTED_BG, theme } from "./theme"
 
-const KIND_WIDTH = 15 // "dead-index" is the longest kind
 const LINK_PATTERN = /\[\[([^\]]+)\]\]/g
 const CODE_SEGMENT = /(```[\s\S]*?```|`[^`]*`)/
 
@@ -32,28 +32,115 @@ export function useIssues(adapters: HarnessAdapter[], roots: Roots, reloads: num
   return issues
 }
 
+interface IssueText {
+  group: "secrets" | "memory" | "skills"
+  title: string // the detail strip title
+  key: string // the fixing key hint
+  sentence: (issue: Issue) => string
+  fix: string // what the key does
+}
+
+const fileName = (issue: Issue) => basename(issue.path)
+const ISSUE_TEXT: Record<Issue["kind"], IssueText> = {
+  "mcp-secret": { group: "secrets", title: "Secret in config", key: "f fix", sentence: (issue) => `${issue.detail.split(" ")[0]} holds a literal value`, fix: "f replaces it with ${NAME}, which the harness reads from your environment." },
+  "broken-link": { group: "memory", title: "Broken link", key: "r unlink", sentence: (issue) => `${issue.detail.match(/^\[\[.+?\]\]/)?.[0] ?? issue.detail} links to no entry`, fix: "r turns the link into plain text." },
+  orphan: { group: "memory", title: "Not in MEMORY.md", key: "f add", sentence: (issue) => `${fileName(issue).replace(/\.md$/, "")} is missing from MEMORY.md`, fix: "f adds its line at the top of MEMORY.md, so it loads at start." },
+  "dead-index": { group: "memory", title: "Dead index line", key: "f drop", sentence: (issue) => `MEMORY.md ${issue.detail.match(/^line \d+/)?.[0] ?? "a line"} points to a missing file`, fix: "f drops that line from MEMORY.md." },
+  "past-limit": { group: "memory", title: "Past the load limit", key: "e edit", sentence: (issue) => `${fileName(issue)} is past the MEMORY.md load limit`, fix: "e opens the file so you can shorten the index." },
+  "bad-frontmatter": { group: "memory", title: "Bad header", key: "e edit", sentence: (issue) => `${fileName(issue)} has a header that is not valid YAML`, fix: "e opens the file so you can repair its header." },
+  "over-budget": { group: "memory", title: "Over budget", key: "e edit", sentence: (issue) => `${fileName(issue)} is over its line budget`, fix: "e opens the file so you can shorten it." },
+  skill: { group: "skills", title: "Skill check", key: "e edit", sentence: (issue) => issue.detail.charAt(0).toUpperCase() + issue.detail.slice(1), fix: "e opens SKILL.md so you can fix it." },
+}
+
+const GROUPS: { id: IssueText["group"]; label: string; color: string }[] = [
+  { id: "secrets", label: "SECRETS IN CONFIG", color: theme.err },
+  { id: "memory", label: "AUTO MEMORY", color: theme.warn },
+  { id: "skills", label: "SKILLS", color: theme.warn },
+]
+
+// Secrets first, then auto memory, then skills: the order the rows show and the keys act on.
+export function orderIssues(issues: Issue[]): Issue[] {
+  return GROUPS.flatMap((group) => issues.filter((issue) => ISSUE_TEXT[issue.kind].group === group.id))
+}
+
+export const issueId = (issue: Issue) => `${issue.kind}\0${issue.path}\0${issue.detail}`
+
+// "3 secrets · 7 warnings" for the key bar.
+export function issueSummary(issues: Issue[]): string {
+  const secrets = issues.filter((issue) => issue.kind === "mcp-secret").length
+  return `${secrets} secret${secrets === 1 ? "" : "s"} · ${issues.length - secrets} warning${issues.length - secrets === 1 ? "" : "s"}`
+}
+
 interface HealthProps {
-  issues: Issue[]
-  selected: number
+  issues: Issue[] // in orderIssues order
+  selectedId: string | undefined
   layout: { home: string; width: number }
 }
 
-export function Health({ issues, selected, layout }: HealthProps) {
+export function Health({ issues, selectedId, layout }: HealthProps) {
   if (issues.length === 0) return <text fg={DIM}> No issues.</text>
+  const rows = GROUPS.flatMap((group) => {
+    const found = issues.filter((issue) => ISSUE_TEXT[issue.kind].group === group.id)
+    if (found.length === 0) return []
+    const head = { id: `group\0${group.id}`, node: <IssueGroupRow label={group.label} color={group.color} count={found.length} width={layout.width} /> }
+    return [head, ...found.map((issue) => ({ id: issueId(issue), node: <IssueRow issue={issue} selected={issueId(issue) === selectedId} layout={layout} /> }))]
+  })
+  return <ScrollList rows={rows} selectedId={selectedId} />
+}
+
+function IssueGroupRow({ label, color, count, width }: { label: string; color: string; count: number; width: number }) {
   return (
-    <box flexDirection="column" paddingLeft={1}>
-      <text fg={DIM} wrapMode="none">{truncate("Fix repairs the file. Unlink turns [[x]] into plain text.", layout.width)}</text>
-      {issues.map((issue, index) => (
-        <text key={`${issue.kind}\0${issue.path}\0${issue.detail}`} wrapMode="none" fg={index === selected ? theme.selFg : undefined} bg={index === selected ? SELECTED_BG : undefined}>
-          {truncate(issueRow(issue, index === selected, layout.home), layout.width)}
-        </text>
-      ))}
+    <text wrapMode="none">
+      <span fg={color}><b>{` ${label} `}</b></span>
+      <span fg={theme.faint}>{"─".repeat(Math.max(1, width - label.length - String(count).length - 4))}</span>
+      <span fg={DIM}>{` ${count} `}</span>
+    </text>
+  )
+}
+
+const SENTENCE_WIDTH = 50
+const PLACE_WIDTH = 28
+const KEY_WIDTH = 10 // "r unlink" and its gap
+
+function IssueRow({ issue, selected, layout }: { issue: Issue; selected: boolean; layout: HealthProps["layout"] }) {
+  const text = ISSUE_TEXT[issue.kind]
+  // The sentence gives up room first, so the fixing key always shows.
+  const sentenceWidth = Math.max(10, Math.min(SENTENCE_WIDTH, layout.width - PLACE_WIDTH - KEY_WIDTH))
+  const room = Math.max(0, layout.width - sentenceWidth - PLACE_WIDTH - 2)
+  return (
+    <box width={layout.width} flexDirection="row" backgroundColor={selected ? SELECTED_BG : undefined}>
+      <text wrapMode="none">
+        <span fg={ACCENT}>{selected ? "▌" : " "}</span>
+        {` ${pad(text.sentence(issue), sentenceWidth)}`}
+        <span fg={DIM}>{pad(issuePlace(issue, layout.home), PLACE_WIDTH)}</span>
+        <span fg={ACCENT}>{text.key.slice(0, room)}</span>
+      </text>
     </box>
   )
 }
 
-function issueRow(issue: Issue, selected: boolean, home: string): string {
-  return `${selected ? "▸ " : "  "}▲ ${issue.kind.padEnd(KIND_WIDTH)}${issue.detail}  ${tildePath(issue.path, home)}`
+// A short location: the file for memory issues, the folder for skills, the config file for secrets.
+function issuePlace(issue: Issue, home: string): string {
+  if (issue.kind === "dead-index") return `MEMORY.md · ${issue.detail.match(/missing (.+)$/)?.[1] ?? ""}`
+  if (issue.kind === "skill") return shortPath(tildePath(dirname(issue.path), home), PLACE_WIDTH - 1)
+  if (issue.kind === "mcp-secret") return shortPath(tildePath(issue.path, home), PLACE_WIDTH - 1)
+  return basename(issue.path)
+}
+
+// The detail strip for the selected issue: what is wrong, what the fix does, and that nothing is written unreviewed.
+export function IssueDetail({ issue, home }: { issue: Issue | undefined; home: string }) {
+  if (!issue) return <text fg={DIM} wrapMode="none"> Nothing to fix.</text>
+  const text = ISSUE_TEXT[issue.kind]
+  return (
+    <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+      <text wrapMode="none"><span fg={ACCENT}><b>{text.title}</b></span></text>
+      <text fg={theme.faint} wrapMode="none">{tildePath(issue.path, home)}</text>
+      <text wrapMode="none">{" "}</text>
+      <text wrapMode="none">{`${text.sentence(issue)}.`}</text>
+      <text wrapMode="none">{text.fix}</text>
+      <text fg={DIM} wrapMode="none">You review the change before anything is written.</text>
+    </box>
+  )
 }
 
 interface IssueAction {

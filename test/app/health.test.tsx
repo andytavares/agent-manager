@@ -56,7 +56,7 @@ const adapter: HarnessAdapter = {
 type Setup = Awaited<ReturnType<typeof renderApp>>
 
 function renderApp() {
-  return testRender(<App adapters={[adapter]} roots={roots} backupRoot={join(home, "backups")} onQuit={() => {}} />, { width: 100, height: 24 })
+  return testRender(<App adapters={[adapter]} roots={roots} backupRoot={join(home, "backups")} onQuit={() => {}} />, { width: 120, height: 34 })
 }
 
 // waitForFrame stops when no render is scheduled; file I/O can finish after that, so retry for up to 2s.
@@ -76,14 +76,13 @@ test("the Health tab shows its count in the tab row and each issue as a row", as
   try {
     await waitForText(setup, "1 Memory")
     setup.mockInput.pressKey("5")
-    const frame = await waitForText(setup, "Health · 2 issues")
+    const frame = await waitForText(setup, "2 issues")
     expect(frame).toContain("5 Health ▲2")
-    expect(frame).toContain("▲ orphan")
-    expect(frame).toContain("not listed in MEMORY.md")
-    expect(frame).toContain("▲ dead-index")
-    expect(frame).toContain("line 2 points to missing project_gone.md")
-    expect(frame).toContain("▸ ▲")
-    expect(frame).toContain("f fix")
+    expect(frame).toMatch(/AUTO MEMORY ─+ 2 /)
+    expect(frame).toMatch(/project_capex is missing from MEMORY\.md\s+project_capex\.md\s+f add/)
+    expect(frame).toMatch(/MEMORY\.md line 2 points to a missing file\s+MEMORY\.md · project_gone\.md\s+f drop/)
+    expect(frame).toContain("▌ ")
+    expect(frame).toContain("0 secrets · 2 warnings")
   } finally {
     setup.renderer.destroy()
   }
@@ -94,11 +93,10 @@ test("f on the orphan opens the review with the MEMORY.md index line added", asy
   try {
     await waitForText(setup, "1 Memory")
     setup.mockInput.pressKey("5")
-    await waitForText(setup, "Health · 2 issues")
+    await waitForText(setup, "2 issues")
     setup.mockInput.pressArrow("down") // orphan, after the dead index line
     setup.mockInput.pressKey("f")
-    const review = await waitForText(setup, "nothing is written until you press enter")
-    expect(review).toContain("1 changes")
+    const review = await waitForText(setup, "⏎ apply")
     expect(review).toContain("MEMORY.md")
     expect(review).toContain("[project-capex](project_capex.md) — Check the capex plan")
   } finally {
@@ -112,10 +110,10 @@ test("f on an orphan whose frontmatter is not valid YAML still opens the review"
   try {
     await waitForText(setup, "1 Memory")
     setup.mockInput.pressKey("5")
-    await waitForText(setup, "▲ orphan")
+    await waitForText(setup, "is missing from MEMORY.md")
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressKey("f")
-    const review = await waitForText(setup, "nothing is written until you press enter")
+    const review = await waitForText(setup, "⏎ apply")
     expect(review).toContain("[project-capex](project_capex.md) — Where: the capex plan lives")
   } finally {
     setup.renderer.destroy()
