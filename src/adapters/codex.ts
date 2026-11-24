@@ -168,12 +168,16 @@ async function subfolders(path: string): Promise<string[]> {
   return (await readdir(path, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name)
 }
 
+// Codex's validate_plugin_segment: https://github.com/openai/codex/blob/main/codex-rs/core-plugin-common/src/plugin_id.rs
+const MARKETPLACE_NAME = /^[A-Za-z0-9_-]+$/
+const PLUGIN_NAME = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/
+
 // Installed plugins: plugins/cache/<marketplace>/<plugin>/<version>/, keyed by "<plugin>@<marketplace>".
 async function installedPlugins(codexHome: string): Promise<Map<string, string>> {
   const installed = new Map<string, string>()
   const cache = join(codexHome, "plugins", "cache")
-  for (const marketplace of await subfolders(cache)) {
-    for (const plugin of await subfolders(join(cache, marketplace))) {
+  for (const marketplace of (await subfolders(cache)).filter((name) => MARKETPLACE_NAME.test(name))) {
+    for (const plugin of (await subfolders(join(cache, marketplace))).filter((name) => PLUGIN_NAME.test(name))) {
       const versions = (await subfolders(join(cache, marketplace, plugin))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
       if (versions.length > 0) installed.set(`${plugin}@${marketplace}`, join(cache, marketplace, plugin, versions.at(-1)!))
     }

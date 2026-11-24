@@ -161,6 +161,11 @@ test("installed plugins take the highest version; enabled comes from config", as
   })
 })
 
+test("cache folders Codex cannot name as a plugin are not listed", async () => {
+  mkdirSync(join(codexHome, "plugins/cache/claude-cowork/.agents/1.0.0"), { recursive: true })
+  expect(Object.keys(await byName("plugin")).sort()).toEqual(["github@official", "linear@official", "slack@official"])
+})
+
 test("trusted project config wins for plugin enabled", async () => {
   trustProject()
   expect((await byName("plugin"))["github@official"]?.offIn).toEqual(["codex"])
