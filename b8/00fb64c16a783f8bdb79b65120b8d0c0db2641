@@ -1,0 +1,21 @@
+src/adapters/codex.ts
+  s_0f9fe257794241::t_a2a6076734d033 13,189-202,204,209-210,220,345
+test/adapters/codex.test.ts
+  s_0f9fe257794241::t_a2a6076734d033 2,169-192,265
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b800fb64c16a783f8bdb79b65120b8d0c0db2641",
+  "prompts": {},
+  "sessions": {
+    "s_0f9fe257794241": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "831f7331-e6a0-43f7-84cf-35d751bae8d0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
