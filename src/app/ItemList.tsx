@@ -2,12 +2,12 @@ import { dirname } from "node:path"
 import type { ReactNode } from "react"
 import { HARNESS_LABELS, type HarnessId, type Item, type Kind } from "../core/model"
 import { search } from "../memory/fuzzy"
-import { pad, shortPath } from "../memory/format"
 import type { AutoEntry } from "../memory/types"
+import { CellHeader, Cells, columnWidths, SelectableRow, type Cell, type Column } from "./CellRow"
 import { entryItem, type EntriesView } from "./entries"
-import { budgetRow, entryRow } from "./MemoryEntries"
+import { budgetRow, ENTRY_COLUMNS, entryCells, entryRow } from "./MemoryEntries"
 import { ScrollList, type ScrollRow } from "./ScrollList"
-import { ACCENT, DIM, SELECTED_BG, theme } from "./theme"
+import { ACCENT, DIM, theme } from "./theme"
 import type { UsageView } from "./usage"
 
 export const SHORT_CODES: Record<HarnessId, string> = { "claude-code": "CC", codex: "Cx", opencode: "OC", omp: "omp" }
@@ -94,15 +94,19 @@ interface ItemListProps {
 export function ItemList({ kind, groups, selectedId, width, filter, context, entriesDir, note }: ItemListProps) {
   const table = TABLES[kind]
   const columns = table.columns(context.harnessIds)
-  const rows = groups.flatMap((group) => groupRows({ group, filter, draw: (row) => (row.entry ? entryRow(row.entry, width) : <ItemRow cells={table.row(row.item, context)} widths={columns.map((column) => column.width)} filter={filter} width={width} />), entriesDir, width }))
-  const selectable = new Set(groups.flatMap((group) => group.rows.map((row) => row.id)))
-  const marked = rows.map((row) => (selectable.has(row.id) ? { ...row, node: <RowFrame selected={row.id === selectedId} width={width}>{row.node}</RowFrame> } : row))
+  const listed = groups.flatMap((group) => group.rows)
+  const widths = columnWidths(columns, listed.filter((row) => !row.entry).map((row) => table.row(row.item, context)))
+  const entryWidths = columnWidths(ENTRY_COLUMNS, listed.flatMap((row) => (row.entry ? [entryCells(row.entry)] : [])))
+  const draw = (row: ListRow) => (row.entry ? entryRow(row.entry, entryWidths) : <Cells cells={table.row(row.item, context)} columns={columns} widths={widths} filter={filter} />)
+  const rows = groups.flatMap((group) => groupRows({ group, filter, draw, entriesDir, width }))
+  const selectable = new Set(listed.map((row) => row.id))
+  const marked = rows.map((row) => (selectable.has(row.id) ? { ...row, node: <SelectableRow selected={row.id === selectedId}>{row.node}</SelectableRow> } : row))
   return (
     <box flexDirection="column" flexGrow={1} overflow="hidden">
-      <text fg={DIM} wrapMode="none">{`  ${columns.map((column) => pad(column.header, column.width)).join("")}${table.lastHeader}`.slice(0, width)}</text>
+      <CellHeader columns={columns} widths={widths} />
       <ScrollList rows={marked} selectedId={selectedId} />
-      {note !== "" && <text fg={DIM} wrapMode="none">{`  ${note}`.slice(0, width)}</text>}
-      {context.usage.note !== "" && <text fg={DIM} wrapMode="none">{`  ${context.usage.note}`.slice(0, width)}</text>}
+      {note !== "" && <text fg={DIM}>{`  ${note}`}</text>}
+      {context.usage.note !== "" && <text fg={DIM}>{`  ${context.usage.note}`}</text>}
     </box>
   )
 }
@@ -136,98 +140,45 @@ function GroupRow({ label, count, width }: { label: string; count: string; width
   )
 }
 
-// The first cell holds the selected row's accent bar; the selection background runs across the row.
-function RowFrame({ selected, width, children }: { selected: boolean; width: number; children: ReactNode }) {
-  return (
-    <box width={width} flexDirection="row" backgroundColor={selected ? SELECTED_BG : undefined}>
-      <text fg={ACCENT} wrapMode="none">{selected ? "▌" : " "}</text>
-      <box flexGrow={1}>{children}</box>
-    </box>
-  )
-}
-
-export type Cell = [text: string, color?: string]
-
-interface ItemRowProps {
-  cells: Cell[]
-  widths: number[]
-  filter: string
-  width: number
-}
-
-// Cells are padded to their column; the name cell shows the filter match in the accent colour.
-function ItemRow({ cells, widths, filter, width }: ItemRowProps) {
-  const [name, nameColor] = cells[0]!
-  const rest = cells.slice(1)
-  const texts = cells.map(([text], index) => (widths[index] === undefined ? text : pad(text, widths[index]!)))
-  const room = Math.max(0, width - 2 - texts.slice(0, -1).join("").length)
-  return (
-    <text wrapMode="none" fg={nameColor}>
-      {" "}
-      <Highlight text={texts[0]!} filter={filter} plain={name} />
-      {rest.map(([, color], index) => {
-        const text = texts[index + 1]!
-        return <span key={index} fg={color}>{index === rest.length - 1 ? text.slice(0, room) : text}</span>
-      })}
-    </text>
-  )
-}
-
-function Highlight({ text, filter, plain }: { text: string; filter: string; plain: string }) {
-  const at = filter ? plain.toLowerCase().indexOf(filter.toLowerCase()) : -1
-  if (at < 0) return <span>{text}</span>
-  return (
-    <span>
-      {text.slice(0, at)}
-      <span fg={ACCENT}><b>{text.slice(at, at + filter.length)}</b></span>
-      {text.slice(at + filter.length)}
-    </span>
-  )
-}
-
-interface Column {
-  header: string
-  width: number
-}
-
 interface Table {
-  columns(harnessIds: HarnessId[]): Column[] // every column but the last
-  lastHeader: string
+  columns(harnessIds: HarnessId[]): Column[]
   row(item: Item, context: RowContext): Cell[]
 }
 
-const MARK_WIDTH = 5 // SHORT_CODES are 2 or 3 cells wide
-
-const markColumns = (harnessIds: HarnessId[]) => harnessIds.map((id) => ({ header: SHORT_CODES[id], width: MARK_WIDTH }))
+const markColumns = (harnessIds: HarnessId[]): Column[] => harnessIds.map((id) => ({ header: SHORT_CODES[id], give: "fixed" }))
 const isOff = (item: Item) => Boolean(item.readOnly) || item.loadedBy.length === 0
 const dimIfOff = (item: Item) => (isOff(item) ? DIM : undefined)
 
 const TABLES: Record<Kind, Table> = {
   memory: {
-    columns: () => [{ header: "FILE", width: 30 }, { header: "LOADED BY", width: 22 }],
-    lastHeader: "NOTE",
+    columns: () => [{ header: "FILE", give: "name" }, { header: "LOADED BY", give: "name" }, { header: "NOTE", give: "note" }],
     row: (item) => [[item.name, dimIfOff(item)], loadedByCell(item), memoryNote(item)],
   },
   skill: {
-    columns: (harnessIds) => [{ header: "SKILL", width: 14 }, { header: "FOLDER", width: 30 }, ...markColumns(harnessIds), { header: "here", width: 6 }, { header: "all", width: 6 }],
-    lastHeader: "NOTE",
+    columns: (harnessIds) => [{ header: "SKILL", give: "name" }, { header: "FOLDER", give: "path" }, ...markColumns(harnessIds), { header: "here", give: "fixed" }, { header: "all", give: "fixed" }, { header: "NOTE", give: "note" }],
     row: (item, context) => [[item.name, dimIfOff(item)], [skillFolder(item, context), dimIfOff(item)], ...marks(item, context), ...usageCells(item, context).slice(0, 2), skillNote(item, context)],
   },
   mcp: {
-    columns: (harnessIds) => [{ header: "SERVER", width: 14 }, { header: "TYPE", width: 7 }, { header: "DEFINED IN", width: 22 }, ...markColumns(harnessIds), { header: "here", width: 6 }, { header: "last used", width: 11 }],
-    lastHeader: "NOTE",
+    columns: (harnessIds) => [
+      { header: "SERVER", give: "name" },
+      { header: "TYPE", give: "fixed" },
+      { header: "DEFINED IN", give: "path" },
+      ...markColumns(harnessIds),
+      { header: "here", give: "fixed" },
+      { header: "last used", give: "fixed" },
+      { header: "NOTE", give: "note" },
+    ],
     row: (item, context) => [
       [item.name, dimIfOff(item)],
       [context.facts.get(item)?.transport ?? "", DIM],
-      [shortPath(placePath(item.path, context), 21), DIM],
+      [placePath(item.path, context), DIM],
       ...marks(item, context),
       ...[usageCells(item, context)[0]!, usageCells(item, context)[2]!],
       mcpNote(item, context),
     ],
   },
   plugin: {
-    columns: () => [{ header: "PLUGIN", width: 20 }, { header: "HARNESS", width: 14 }, { header: "STATE", width: 10 }, { header: "VERSION", width: 10 }],
-    lastHeader: "MARKETPLACE",
+    columns: () => [{ header: "PLUGIN", give: "name" }, { header: "HARNESS", give: "fixed" }, { header: "STATE", give: "fixed" }, { header: "VERSION", give: "fixed" }, { header: "MARKETPLACE", give: "note" }],
     row: (item, context) => [
       [item.name.split("@")[0]!, dimIfOff(item)],
       [HARNESS_LABELS[item.harness], DIM],
@@ -257,7 +208,7 @@ function memoryNote(item: Item): Cell {
 // Plugin skills name their plugin; the others name the folder that holds them.
 function skillFolder(item: Item, context: RowContext): string {
   const plugin = item.readOnly?.match(/^from plugin (.+)$/)?.[1]
-  return plugin ? `plugin ${plugin}` : shortPath(placePath(dirname(item.path), context), 29)
+  return plugin ? `plugin ${plugin.split("@")[0]}` : placePath(dirname(item.path), context)
 }
 
 function skillNote(item: Item, context: RowContext): Cell {

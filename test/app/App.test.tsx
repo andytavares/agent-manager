@@ -168,6 +168,21 @@ test("a long detail text stays inside its pane and keeps the header visible", as
   }
 })
 
+test("a long skill name and folder show whole in the Skills list, with nothing cut", async () => {
+  const skill: Item = { kind: "skill", harness: "claude-code", scope: "global", name: "reverse-engineer-anything", path: "/home/u/.claude/skills/team-shared-reverse-tools/reverse-engineer-anything", loadedBy: ["claude-code"] }
+  const skills: HarnessAdapter = { ...fakeAdapter("claude-code", "Claude Code"), list: async (kind) => (kind === "skill" ? [skill] : []) }
+  const setup = await testRender(<App adapters={[skills]} roots={roots} onQuit={() => {}} />, { width: 120, height: 34 })
+  try {
+    await waitForText(setup, "1 Memory")
+    setup.mockInput.pressKey("2")
+    const frame = await waitForText(setup, "SKILL")
+    expect(frame).toMatch(/▌ reverse-engineer-anything\s/)
+    expect(frame).not.toContain("…")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
 test("/ filters the list by name; esc clears the filter", async () => {
   const setup = await renderApp()
   try {

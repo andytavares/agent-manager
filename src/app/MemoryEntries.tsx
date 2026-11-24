@@ -1,26 +1,24 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { countLines, INDEX_BYTE_LIMIT, INDEX_LINE_LIMIT } from "../memory/entry"
-import { bar, pad } from "../memory/format"
+import { bar } from "../memory/format"
 import type { AutoEntry } from "../memory/types"
+import { Cells, type Cell, type Column } from "./CellRow"
 import { ACCENT, DIM, theme } from "./theme"
 
 const TYPE_COLOR: Record<string, string> = { feedback: theme.warn, reference: ACCENT, project: theme.ok, user: theme.text }
-const TYPE_WIDTH = 12
-const ENTRY_WIDTH = 30
+
+// AUTO MEMORY rows have no header line.
+export const ENTRY_COLUMNS: Column[] = [{ header: "", give: "fixed" }, { header: "", give: "name" }, { header: "", give: "note" }]
 
 // One AUTO MEMORY row: type, title, then the first flag the entry carries.
-export function entryRow(entry: AutoEntry, width: number) {
+export function entryCells(entry: AutoEntry): Cell[] {
   const type = entry.type ?? "-"
-  const flags = flagsOf(entry)
-  return (
-    <text wrapMode="none">
-      {" "}
-      <span fg={TYPE_COLOR[type] ?? theme.text}>{pad(type, TYPE_WIDTH)}</span>
-      <span fg={theme.text}>{pad(entry.title, ENTRY_WIDTH)}</span>
-      <span fg={theme.warn}>{flags.slice(0, Math.max(0, width - TYPE_WIDTH - ENTRY_WIDTH - 2))}</span>
-    </text>
-  )
+  return [[type, TYPE_COLOR[type] ?? theme.text], [entry.title, theme.text], [flagsOf(entry), theme.warn]]
+}
+
+export function entryRow(entry: AutoEntry, widths: number[]) {
+  return <Cells cells={entryCells(entry)} columns={ENTRY_COLUMNS} widths={widths} />
 }
 
 // The flags a row carries: a bad header, no index line, or an index line past the load limit.
