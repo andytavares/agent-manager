@@ -410,20 +410,26 @@ function useDetected(adapters: HarnessAdapter[], roots: Roots): boolean[] {
   return detected
 }
 
+// One array and map for every empty listing: hooks such as useUsage rerun when the items array changes.
+const NO_ITEMS: Item[] = []
+const NO_FACTS = new Map<Item, ReadFacts>()
+const emptyListing = (kind: Kind) => ({ kind, items: NO_ITEMS, facts: NO_FACTS, error: "" })
+
 // reloads: bump to list again after a change is applied.
+// A listing of another kind is not shown while this kind loads, so a tab never shows the last tab's rows.
 function useListing(adapters: HarnessAdapter[], roots: Roots, kind: Kind, reloads: number) {
-  const [listing, setListing] = useState({ items: [] as Item[], facts: new Map<Item, ReadFacts>(), error: "" })
+  const [listing, setListing] = useState(() => emptyListing(kind))
   useEffect(() => {
     let live = true
     loadListing(adapters, roots, kind).then(
-      (loaded) => live && setListing({ ...loaded, error: "" }),
-      (error: Error) => live && setListing({ items: [], facts: new Map(), error: `Cannot list: ${error.message}` }),
+      (loaded) => live && setListing({ kind, ...loaded, error: "" }),
+      (error: Error) => live && setListing({ ...emptyListing(kind), error: `Cannot list: ${error.message}` }),
     )
     return () => {
       live = false
     }
   }, [adapters, roots, kind, reloads])
-  return listing
+  return listing.kind === kind ? listing : emptyListing(kind)
 }
 
 // The MCP rows show a transport and a secret flag, the plugin rows a version: only read() gives them.

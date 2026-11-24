@@ -204,3 +204,23 @@ test("with a harness filter, the on count matches the on rows shown", async () =
     setup.renderer.destroy()
   }
 })
+
+test("while plugins load, the memory rows of the last tab are not shown", async () => {
+  let release = () => {}
+  const loaded = new Promise<void>((resolve) => (release = resolve))
+  const notes: Item = { kind: "memory", harness: "claude-code", scope: "global", name: "CLAUDE.md", path: join(home, ".claude/CLAUDE.md"), loadedBy: ["claude-code"] }
+  const adapter = fakeAdapter("claude-code", "Claude Code")
+  adapter.list = async (kind) => (kind === "memory" ? [notes] : kind === "plugin" ? (await loaded, [github]) : [])
+  const setup = await testRender(<App adapters={[adapter]} roots={roots} backupRoot={join(home, "backups")} onQuit={() => {}} />, { width: 160, height: 40 })
+  try {
+    await waitForText(setup, "CLAUDE.md")
+    setup.mockInput.pressKey("4")
+    const loading = await waitForText(setup, "╭─ Plugins")
+    expect(loading).not.toContain("CLAUDE.md")
+    release()
+    expect(await waitForText(setup, "github@official")).not.toContain("CLAUDE.md")
+  } finally {
+    release()
+    setup.renderer.destroy()
+  }
+})
