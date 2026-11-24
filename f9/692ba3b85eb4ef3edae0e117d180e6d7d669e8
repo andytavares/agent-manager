@@ -1,0 +1,19 @@
+test/app/screen-layout.test.tsx
+  s_b03389a2a19d56::t_ba1e9fba5eabe2 320
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f9692ba3b85eb4ef3edae0e117d180e6d7d669e8",
+  "prompts": {},
+  "sessions": {
+    "s_b03389a2a19d56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec20c517-6e04-4d43-bc55-f60aa0b08378",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
