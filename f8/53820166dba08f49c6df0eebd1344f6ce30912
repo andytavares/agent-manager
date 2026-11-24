@@ -1,0 +1,19 @@
+src/app/DetailPane.tsx
+  s_8135a8e578db20::t_a1a58fe3f020f6 24-31,44-45,47,65-71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "f853820166dba08f49c6df0eebd1344f6ce30912",
+  "prompts": {},
+  "sessions": {
+    "s_8135a8e578db20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f606e684-0212-461b-82c9-75c7acfb2f37",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
