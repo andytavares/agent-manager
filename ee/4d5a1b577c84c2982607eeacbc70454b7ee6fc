@@ -1,0 +1,26 @@
+src/app/App.tsx
+  s_b03389a2a19d56::t_21f37c302ff98d 180,198,473,476-488,492-493,495-496,498,648-649
+  s_b03389a2a19d56::t_52e6fc9f3bd75d 650
+src/app/ReviewChanges.tsx
+  s_b03389a2a19d56::t_21f37c302ff98d 123
+test/app/review.test.tsx
+  s_b03389a2a19d56::t_f5ae511c4de202 142-153
+test/app/shell.test.tsx
+  s_b03389a2a19d56::t_2f3724850744f8 94-118
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ee4d5a1b577c84c2982607eeacbc70454b7ee6fc",
+  "prompts": {},
+  "sessions": {
+    "s_b03389a2a19d56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec20c517-6e04-4d43-bc55-f60aa0b08378",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
