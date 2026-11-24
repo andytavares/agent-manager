@@ -10,7 +10,7 @@ import type { PromptStep } from "./Prompt"
 export type Screen =
   | { name: "list" }
   | { name: "prompt"; title: string; nextStep: (answers: string[]) => PromptStep | null; onDone: (answers: string[]) => void }
-  | { name: "editor"; title: string; initialText: string; toChange: (text: string) => Change }
+  | { name: "editor"; title: string; label?: string; initialText: string; toChange: (text: string) => Change } // label: "Harness · scope"
   | { name: "mcpForm"; title: string; server: McpServer; targets: McpTarget[]; fixed?: boolean; toChanges: (server: McpServer, targets: McpTarget[]) => Change[] }
   | { name: "review"; plan: WritePlan; secrets: string[] } // secrets: literal values masked until revealed
   | { name: "marketplaces"; marketplaces: Marketplace[] }
@@ -20,6 +20,7 @@ export interface Marketplace {
   harness: HarnessId
   name: string
   source: string
+  installed: number // plugins installed from it
 }
 
 export interface FlowContext {
@@ -36,6 +37,14 @@ function target(item: Item) {
   return { harness: item.harness, scope: item.scope }
 }
 
+// Gives every step of a wizard the names of all its steps, for "Step n of N".
+function withSteps(steps: string[], nextStep: (answers: string[]) => PromptStep | null) {
+  return (answers: string[]): PromptStep | null => {
+    const step = nextStep(answers)
+    return step && { ...step, steps }
+  }
+}
+
 export function deleteItem(item: Item, context: FlowContext): void {
   context.review({ kind: item.kind, op: "delete", target: target(item), item })
 }
@@ -44,7 +53,7 @@ export async function editItem(item: Item, context: FlowContext): Promise<Screen
   const detail = await context.adapters.find((adapter) => adapter.id === item.harness)!.read(item)
   const initialText = detail.type === "text" ? detail.text : ""
   const title = item.kind === "skill" ? `${item.name}/SKILL.md` : item.name
-  return { name: "editor", title, initialText, toChange: (text) => ({ kind: item.kind, op: "update", target: target(item), item, text, before: initialText }) }
+  return { name: "editor", title, label: `${HARNESS_LABELS[item.harness]} · ${item.scope}`, initialText, toChange: (text) => ({ kind: item.kind, op: "update", target: target(item), item, text, before: initialText }) }
 }
 
 // Project view adds Claude Code's local scope next to project.
@@ -62,13 +71,14 @@ const isAutoEntry = (file: string) => file.endsWith(":memory/<name>.md")
 export function addMemory(context: FlowContext): Screen {
   const adapters = context.adapters.filter((adapter) => memoryChoices(adapter, context.scope).length > 0)
   const adapterOf = (id: string) => adapters.find((adapter) => adapter.id === id)!
+  const harnessOption = (adapter: HarnessAdapter) => ({ name: adapter.label, description: memoryChoices(adapter, context.scope).map((choice) => choice.name).join(", "), value: adapter.id })
   const nextStep = ([harness, file, name, type, description]: string[]): PromptStep | null => {
-    if (!harness) return { label: "Harness", options: adapters.map((adapter) => ({ name: adapter.label, description: "", value: adapter.id })) }
-    if (!file) return { label: "File", options: memoryChoices(adapterOf(harness), context.scope) }
-    if (file.includes("<name>") && !name) return { label: "Name" }
+    if (!harness) return { label: "Which harness should load it?", hint: "Only harnesses found on this machine are listed.", options: adapters.map(harnessOption) }
+    if (!file) return { label: "Which file?", hint: "You write its text on the next screen.", options: memoryChoices(adapterOf(harness), context.scope) }
+    if (file.includes("<name>") && !name) return { label: "What is it called?", hint: "The name replaces <name> in the file path." }
     if (!isAutoEntry(file)) return null
-    if (!type) return { label: "Type", options: MEMORY_TYPES.map((value) => ({ name: value, description: "", value })) }
-    return description === undefined ? { label: "Description" } : null
+    if (!type) return { label: "Which type of memory?", options: MEMORY_TYPES.map((value) => ({ name: value, description: "", value })) }
+    return description === undefined ? { label: "Describe it in one line.", hint: "Claude Code reads it to decide when the memory applies." } : null
   }
   const onDone = ([harness, file, name, type, description]: string[]) => {
     const separator = file!.indexOf(":")
@@ -76,9 +86,9 @@ export function addMemory(context: FlowContext): Screen {
     const fileName = file!.slice(separator + 1).replace("<name>", name ?? "")
     const initialText = isAutoEntry(file!) ? `---\n${stringify({ name, description, metadata: { type } })}---\n\n` : ""
     const toChange = (text: string): Change => ({ kind: "memory", op: "create", target: { harness: adapterOf(harness!).id, scope }, name: fileName, text })
-    context.open({ name: "editor", title: fileName, initialText, toChange })
+    context.open({ name: "editor", title: fileName, label: `${adapterOf(harness!).label} · ${scope}`, initialText, toChange })
   }
-  return { name: "prompt", title: "Add memory", nextStep, onDone }
+  return { name: "prompt", title: "Add memory", nextStep: withSteps(["Harness", "File", "Name", "Type", "Description"], nextStep), onDone }
 }
 
 function rootOptions(choices: Awaited<ReturnType<typeof skillRootChoices>>, home: string) {
@@ -92,9 +102,9 @@ function rootOptions(choices: Awaited<ReturnType<typeof skillRootChoices>>, home
 export async function newSkill(context: FlowContext): Promise<Screen> {
   const choices = await skillRootChoices(context.adapters, context.roots, context.scope)
   const nextStep = ([name, description, root]: string[]): PromptStep | null => {
-    if (!name) return { label: "Name (folder name)" }
-    if (!description) return { label: "Description" }
-    return root ? null : { label: "Root", options: rootOptions(choices, context.roots.home) }
+    if (!name) return { label: "What is the skill called?", hint: "The name is also its folder name." }
+    if (!description) return { label: "Describe what it does in one line.", hint: "Harnesses read it to decide when to use the skill." }
+    return root ? null : { label: "Which folder should hold it?", hint: "Each folder lists the harnesses that read it.", options: rootOptions(choices, context.roots.home) }
   }
   const onDone = ([name, description, root]: string[]) => {
     const readers = choices.find((choice) => choice.path === root)!.readers
@@ -102,19 +112,26 @@ export async function newSkill(context: FlowContext): Promise<Screen> {
     const harness = readers[0] ?? context.adapters[0]!.id
     context.review({ kind: "skill", op: "create", target: { harness, scope: context.scope }, name, text, destination: root })
   }
-  return { name: "prompt", title: "New skill", nextStep, onDone }
+  return { name: "prompt", title: "New skill", nextStep: withSteps(["Name", "Description", "Folder"], nextStep), onDone }
 }
 
 // op "copy" or "move": to another root of the same scope.
 export async function relocateSkill(item: Item, op: "copy" | "move", context: FlowContext): Promise<Screen> {
   const choices = (await skillRootChoices(context.adapters, context.roots, context.scope)).filter((choice) => choice.path !== dirname(item.path))
-  const options = rootOptions(choices, context.roots.home)
+  const verb = op === "copy" ? "Copy" : "Move"
+  const step = { label: `${verb} it to which folder?`, hint: relocateHint(item, op, context.roots.home), options: rootOptions(choices, context.roots.home) }
   return {
     name: "prompt",
-    title: `${op === "copy" ? "Copy" : "Move"} ${item.name} to…`,
-    nextStep: (answers) => (answers.length ? null : { label: "Root", options }),
+    title: `${verb} skill ${item.name}`,
+    nextStep: withSteps(["Destination"], (answers) => (answers.length ? null : step)),
     onDone: ([destination]) => context.review({ kind: "skill", op, target: target(item), item, destination }),
   }
+}
+
+// A plugin skill is read-only: moving or copying it makes a copy the user owns.
+function relocateHint(item: Item, op: "copy" | "move", home: string): string {
+  if (!item.readOnly?.startsWith("from plugin")) return `It is now in ${tildePath(dirname(item.path), home)}.`
+  return `${item.name} comes ${item.readOnly}. ${op === "copy" ? "Copying" : "Moving"} it makes a copy you own.`
 }
 
 const EMPTY_SERVER: McpServer = { name: "", transport: "stdio", enabled: true, native: {} }
@@ -146,7 +163,7 @@ function addMcp(context: FlowContext): Screen {
 async function editMcp(item: Item, context: FlowContext): Promise<Screen> {
   const server = await readServer(item, context)
   const toChanges = (edited: McpServer): Change[] => [{ kind: "mcp", op: "update", target: target(item), item, server: edited }]
-  return { name: "mcpForm", title: `Edit ${item.name}`, server, targets: [{ ...target(item), checked: true }], fixed: true, toChanges }
+  return { name: "mcpForm", title: `Edit MCP server ${item.name}`, server, targets: [{ ...target(item), checked: true }], fixed: true, toChanges }
 }
 
 async function copyMcp(item: Item, context: FlowContext): Promise<Screen> {
@@ -187,33 +204,40 @@ async function readPlugin(item: Item, context: FlowContext): Promise<PluginInfo>
   return detail.plugin
 }
 
-function harnessOptions(adapters: HarnessAdapter[]) {
-  return adapters.map((adapter) => ({ name: adapter.label, description: "", value: adapter.id }))
+function harnessOptions(adapters: HarnessAdapter[], describe: (adapter: HarnessAdapter) => string = () => "") {
+  return adapters.map((adapter) => ({ name: adapter.label, description: describe(adapter), value: adapter.id }))
 }
+
+export const countOf = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`
 
 // Without a catalog the name is free text; known marketplace names are shown as a hint.
 async function installPlugin(context: FlowContext): Promise<Screen> {
   const adapterOf = (id: string) => context.adapters.find((adapter) => adapter.id === id)!
-  const hints = new Map<string, string>()
-  for (const adapter of context.adapters) {
-    const names = (await adapter.marketplaces?.(context.roots))?.map((marketplace) => marketplace.name) ?? []
-    hints.set(adapter.id, names.length ? `  (marketplaces: ${names.join(", ")})` : "")
-  }
+  const names = new Map<string, string[]>()
+  for (const adapter of context.adapters) names.set(adapter.id, (await adapter.marketplaces?.(context.roots))?.map((marketplace) => marketplace.name) ?? [])
+  const nameHint = (harness: string) => (names.get(harness)!.length ? `Write name@marketplace. Known marketplaces: ${names.get(harness)!.join(", ")}` : "Write the plugin name.")
   const nextStep = ([harness, scope, name]: string[]): PromptStep | null => {
-    if (!harness) return { label: "Harness", options: harnessOptions(context.adapters) }
-    if (!scope) return { label: "Scope", options: adapterOf(harness).scopes.map((value) => ({ name: value, description: "", value })) }
-    return name ? null : { label: `Plugin name${hints.get(harness)}` }
+    if (!harness) return { label: "Install for which harness?", hint: "Each harness shows how many marketplaces it knows.", options: harnessOptions(context.adapters, (adapter) => countOf(names.get(adapter.id)!.length, "marketplace")) }
+    if (!scope) return { label: "Install at which scope?", options: adapterOf(harness).scopes.map((value) => ({ name: value, description: "", value })) }
+    return name ? null : { label: "Which plugin?", hint: nameHint(harness) }
   }
   const onDone = ([harness, scope, name]: string[]) =>
     context.review({ kind: "plugin", op: "create", target: { harness: harness as HarnessId, scope: scope as Scope }, plugin: { name: name!, enabled: true } })
-  return { name: "prompt", title: "Install plugin", nextStep, onDone }
+  return { name: "prompt", title: "Install plugin", nextStep: withSteps(["Harness", "Scope", "Plugin"], nextStep), onDone }
 }
 
 export async function marketplaceList(context: FlowContext): Promise<Screen> {
-  const lists = await Promise.all(
-    context.adapters.map(async (adapter) => ((await adapter.marketplaces?.(context.roots)) ?? []).map((entry) => ({ ...entry, harness: adapter.id }))),
-  )
+  const lists = await Promise.all(context.adapters.map((adapter) => marketplacesOf(adapter, context.roots)))
   return { name: "marketplaces", marketplaces: lists.flat() }
+}
+
+// A plugin comes from the marketplace its "@<marketplace>" suffix names.
+async function marketplacesOf(adapter: HarnessAdapter, roots: Roots): Promise<Marketplace[]> {
+  const entries = (await adapter.marketplaces?.(roots)) ?? []
+  if (!entries.length) return []
+  const plugins = await adapter.list("plugin", roots)
+  const installed = (name: string) => plugins.filter((plugin) => plugin.name.endsWith(`@${name}`)).length
+  return entries.map((entry) => ({ ...entry, harness: adapter.id, installed: installed(entry.name) }))
 }
 
 function marketplaceTarget(harness: HarnessId, context: FlowContext) {
@@ -223,12 +247,12 @@ function marketplaceTarget(harness: HarnessId, context: FlowContext) {
 export function addMarketplace(context: FlowContext): Screen {
   const adapters = context.adapters.filter((adapter) => adapter.marketplaces)
   const nextStep = ([harness, source]: string[]): PromptStep | null => {
-    if (!harness) return { label: "Harness", options: harnessOptions(adapters) }
-    return source ? null : { label: "Source (owner/repo, git URL or path)" }
+    if (!harness) return { label: "Add it to which harness?", hint: "Only harnesses that use marketplaces are listed.", options: harnessOptions(adapters) }
+    return source ? null : { label: "Where is the marketplace?", hint: "owner/repo, a git URL or a local path" }
   }
   const onDone = ([harness, source]: string[]) =>
     context.review({ kind: "plugin", op: "create", target: marketplaceTarget(harness as HarnessId, context), marketplace: source })
-  return { name: "prompt", title: "Add marketplace", nextStep, onDone }
+  return { name: "prompt", title: "Add marketplace", nextStep: withSteps(["Harness", "Source"], nextStep), onDone }
 }
 
 export function removeMarketplace(marketplace: Marketplace, context: FlowContext): void {

@@ -75,7 +75,7 @@ async function waitForText(setup: Setup, text: string): Promise<string> {
 
 async function openMcpTab(setup: Setup) {
   setup.mockInput.pressKey("3")
-  await waitForText(setup, "Authorization: ••••••••") // detail pane of the selected server
+  await waitForText(setup, "Authorization = ••••••••") // detail pane of the selected server
 }
 
 // Renders after the tabs so that the newly focused input gets the next typed text.
@@ -98,7 +98,7 @@ test("add with two targets plans each and shows both in one review", async () =>
     setup.mockInput.pressTab()
     setup.mockInput.pressKey(" ")
     setup.mockInput.pressEnter()
-    const review = await waitForText(setup, "nothing is written")
+    const review = await waitForText(setup, "Review changes")
     expect(review).toContain("/planned/claude-code/global.json")
     expect(review).toContain("/planned/codex/global.json")
     expect(changes.map((change) => [change.op, change.target.harness, change.server?.name, change.server?.command])).toEqual([
@@ -121,7 +121,7 @@ test("edit fills the form from read() and offers only the item's harness", async
     expect(form).toContain("Claude Code")
     expect(form).not.toContain("Codex")
     setup.mockInput.pressEnter()
-    await waitForText(setup, "nothing is written")
+    await waitForText(setup, "Review changes")
     expect(changes[0]).toMatchObject({ op: "update", target: { harness: "claude-code", scope: "global" }, item: { name: "linear" }, server: { url: LINEAR.url } })
   } finally {
     setup.renderer.destroy()
@@ -153,7 +153,7 @@ test("space plans an update with enabled flipped", async () => {
   try {
     await openMcpTab(setup)
     setup.mockInput.pressKey(" ")
-    await waitForText(setup, "nothing is written")
+    await waitForText(setup, "Review changes")
     expect(changes[0]).toMatchObject({ op: "update", item: { name: "linear" }, server: { name: "linear", enabled: false } })
   } finally {
     setup.renderer.destroy()
@@ -178,7 +178,7 @@ test("a literal header secret is masked in review and shown after r", async () =
   try {
     await openMcpTab(setup)
     setup.mockInput.pressKey(" ")
-    const review = await waitForText(setup, "nothing is written")
+    const review = await waitForText(setup, "Review changes")
     expect(review).not.toContain("sk-live-123")
     expect(review).toContain('"Authorization":"••••••••"')
     setup.mockInput.pressKey("r")
@@ -195,6 +195,46 @@ test("a plan error shows its message as one line", async () => {
     setup.mockInput.pressKey("d")
     const frame = await waitForText(setup, "linear is managed by policy.")
     expect(frame).toContain("a add")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("enter on an empty add form marks the name and the harnesses and plans nothing", async () => {
+  const setup = await renderApp()
+  try {
+    await openMcpTab(setup)
+    setup.mockInput.pressKey("a")
+    await waitForText(setup, "WRITE TO")
+    setup.mockInput.pressEnter()
+    const frame = await waitForText(setup, "▲ Name is required")
+    expect(frame).toContain("▲ Pick at least one harness")
+    expect(changes).toEqual([])
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("a header that holds a literal value is marked in the form", async () => {
+  const setup = await renderApp()
+  try {
+    await openMcpTab(setup)
+    setup.mockInput.pressKey("e")
+    const form = await waitForText(setup, "WRITE TO")
+    expect(form).toMatch(/Headers +Authorization=Bearer sk-live-123 +▲ literal value/)
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("the edit form names the server and says the edit stays in its file", async () => {
+  const setup = await renderApp()
+  try {
+    await openMcpTab(setup)
+    setup.mockInput.pressKey("e")
+    const form = await waitForText(setup, "WRITE TO")
+    expect(form).toContain("Edit MCP server linear")
+    expect(form).toContain("WRITE TO  an edit stays in its file")
   } finally {
     setup.renderer.destroy()
   }

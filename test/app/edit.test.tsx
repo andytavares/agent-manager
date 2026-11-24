@@ -101,7 +101,7 @@ async function editAndSave(setup: Setup) {
   await waitForText(setup, "ctrl+s")
   await setup.mockInput.typeText("Use tabs. ")
   setup.mockInput.pressKey("s", { ctrl: true })
-  return waitForText(setup, "nothing is written until you press enter")
+  return waitForText(setup, "Review changes")
 }
 
 test("edit memory, ctrl+s shows the diff, esc writes nothing", async () => {
@@ -109,7 +109,7 @@ test("edit memory, ctrl+s shows the diff, esc writes nothing", async () => {
   try {
     const review = await editAndSave(setup)
     expect(review).toContain("Use tabs. Be brief.")
-    expect(review).toContain("Backup ›")
+    expect(review).toContain("Backup: ")
     setup.mockInput.pressEscape()
     await waitForText(setup, "a add")
     expect(readFileSync(memoryPath, "utf8")).toBe("Be brief.\n")
@@ -152,13 +152,13 @@ test("add memory plans a create of the chosen file with the filled-in name", asy
   try {
     await waitForText(setup, "Be brief.")
     setup.mockInput.pressKey("a")
-    await waitForText(setup, "Harness")
+    await waitForText(setup, "Which harness should load it?")
     setup.mockInput.pressArrow("down") // Codex
     setup.mockInput.pressEnter()
-    await waitForText(setup, "rules/<name>.md")
+    await waitForText(setup, "Which file?")
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressEnter()
-    await waitForText(setup, "Name")
+    await waitForText(setup, "What is it called?")
     await setup.mockInput.typeText("style")
     setup.mockInput.pressEnter()
     await waitForText(setup, "ctrl+s")
@@ -177,18 +177,18 @@ test("an auto memory entry asks for its type and description and starts with tha
   try {
     await waitForText(setup, "Be brief.")
     setup.mockInput.pressKey("a")
-    await waitForText(setup, "Harness")
+    await waitForText(setup, "Which harness should load it?")
     setup.mockInput.pressEnter() // Claude Code
-    await waitForText(setup, "memory/<name>.md")
+    await waitForText(setup, "Which file?")
     setup.mockInput.pressArrow("down")
     setup.mockInput.pressEnter()
-    await waitForText(setup, "Name")
+    await waitForText(setup, "What is it called?")
     await setup.mockInput.typeText("no-checkins")
     setup.mockInput.pressEnter()
-    await waitForText(setup, "reference")
+    await waitForText(setup, "Which type of memory?")
     setup.mockInput.pressArrow("down") // feedback
     setup.mockInput.pressEnter()
-    await waitForText(setup, "Description")
+    await waitForText(setup, "Describe it in one line.")
     await setup.mockInput.typeText("Finish the task")
     setup.mockInput.pressEnter()
     await waitForText(setup, "ctrl+s")
@@ -240,7 +240,7 @@ test("m on a flagged skill plans a move to the chosen root", async () => {
     await waitForText(setup, "~/.agents/skills")
     setup.mockInput.pressArrow("down") // ~/.agents/skills, after ~/.claude/skills
     setup.mockInput.pressEnter()
-    const review = await waitForText(setup, "nothing is written")
+    const review = await waitForText(setup, "Review changes")
     expect(review).toContain("~/.agents/skills/pdf")
     expect(planned?.change).toMatchObject({ kind: "skill", op: "move", destination: join(home, ".agents/skills") })
     expect(planned?.readers).toEqual(["codex"])
@@ -257,6 +257,78 @@ test("the detail pane lists skill checks per harness that loads the skill", asyn
     await waitForText(setup, "likely not loaded")
     setup.mockInput.pressArrow("down") // research
     expect(await waitForText(setup, "Claude Code: research ok")).not.toContain("Codex: research ok")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("add memory opens at step 1 of 5 and names every step", async () => {
+  const setup = await renderApp()
+  try {
+    await waitForText(setup, "Be brief.")
+    setup.mockInput.pressKey("a")
+    const frame = await waitForText(setup, "Step 1 of 5")
+    expect(frame).toContain("● Harness  ○ File  ○ Name  ○ Type  ○ Description")
+    expect(frame).toContain("Which harness should load it?")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("the next wizard step lists the earlier answer by its name and marks the step done", async () => {
+  const setup = await renderApp()
+  try {
+    await waitForText(setup, "Be brief.")
+    setup.mockInput.pressKey("a")
+    await waitForText(setup, "Step 1 of 5")
+    setup.mockInput.pressArrow("down") // Codex
+    setup.mockInput.pressEnter()
+    const frame = await waitForText(setup, "Step 2 of 5")
+    expect(frame).toMatch(/Harness +Codex/)
+    expect(frame).toContain("✓ Harness  ● File")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("the editor numbers each line and marks the text modified once it differs", async () => {
+  const setup = await renderApp()
+  try {
+    await waitForText(setup, "Be brief.")
+    setup.mockInput.pressKey("e")
+    const before = await waitForText(setup, "ctrl+s")
+    expect(before).toMatch(/1 +Be brief\./)
+    expect(before).not.toContain("● modified")
+    await setup.mockInput.typeText("Use tabs. ")
+    await waitForText(setup, "● modified")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("the editor shows the cursor line, column and line count", async () => {
+  const setup = await renderApp()
+  try {
+    await waitForText(setup, "Be brief.")
+    setup.mockInput.pressKey("e")
+    await waitForText(setup, "line 1, col 1 · 2 lines")
+    await setup.mockInput.typeText("Use ")
+    await waitForText(setup, "line 1, col 5 · 2 lines")
+  } finally {
+    setup.renderer.destroy()
+  }
+})
+
+test("m on a plugin skill names the move and says it makes a copy you own", async () => {
+  listed["codex skill"] = [{ ...skillItem(), readOnly: "from plugin alpha@mkt" }]
+  const setup = await renderApp()
+  try {
+    setup.mockInput.pressKey("2")
+    await waitForText(setup, "pdf")
+    setup.mockInput.pressKey("m")
+    const frame = await waitForText(setup, "Move skill pdf")
+    expect(frame).toContain("Step 1 of 1")
+    expect(frame).toContain("pdf comes from plugin alpha@mkt. Moving it makes a copy you own.")
   } finally {
     setup.renderer.destroy()
   }
