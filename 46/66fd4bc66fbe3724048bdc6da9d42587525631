@@ -1,0 +1,21 @@
+src/core/registry.ts
+  s_0f9fe257794241::t_e53ff38b613f45 30-32
+test/core/registry.test.ts
+  s_0f9fe257794241::t_e1f742d84bf4e6 113-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4666fd4bc66fbe3724048bdc6da9d42587525631",
+  "prompts": {},
+  "sessions": {
+    "s_0f9fe257794241": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "831f7331-e6a0-43f7-84cf-35d751bae8d0",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
