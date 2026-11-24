@@ -110,6 +110,19 @@ test("sorts by name, then harness order", async () => {
   expect(items.map((i) => `${i.name}:${i.harness}`)).toEqual(["a:codex", "b:codex", "b:omp"])
 })
 
+test("sorts plugins by harness order, then name", async () => {
+  const plugin = (harness: HarnessId, name: string) => item({ kind: "plugin", harness, name, path: `/${harness}/${name}` })
+  const items = await listItems(
+    [
+      fakeAdapter("codex", [plugin("codex", "linear@official"), plugin("codex", "figma@official")]),
+      fakeAdapter("claude-code", [plugin("claude-code", "slack@official"), plugin("claude-code", "github@official")]),
+    ],
+    "plugin",
+    roots,
+  )
+  expect(items.map((i) => `${i.harness}:${i.name}`)).toEqual(["claude-code:github@official", "claude-code:slack@official", "codex:figma@official", "codex:linear@official"])
+})
+
 test("maskSecret keeps env references and hides literal values", () => {
   expect(maskSecret("${LINEAR_TOKEN}")).toBe("${LINEAR_TOKEN}")
   expect(maskSecret("Bearer ${LINEAR_TOKEN}")).toBe("Bearer ${LINEAR_TOKEN}")
