@@ -1,0 +1,38 @@
+src/app/KeyBar.tsx
+  s_8135a8e578db20::t_0f2ef884c9b9ef 1-52
+test/memory/format.test.ts
+  s_8135a8e578db20::t_aaf3622021df7f 1-17
+test/app/scroll-list.test.tsx
+  s_8135a8e578db20::t_aaf3622021df7f 1-22,24-27
+  s_8135a8e578db20::t_fda4d6ec6969a4 23
+src/memory/format.ts
+  s_8135a8e578db20::t_0f2ef884c9b9ef 10-23
+test/app/dialog.test.tsx
+  s_8135a8e578db20::t_54cd3b043e481b 1-15,17-20
+  s_8135a8e578db20::t_d34009f8b1e1f0 16
+test/app/key-bar.test.tsx
+  s_8135a8e578db20::t_aaf3622021df7f 1-15
+src/app/ScrollList.tsx
+  s_8135a8e578db20::t_0f2ef884c9b9ef 1-29
+src/app/Dialog.tsx
+  s_8135a8e578db20::t_d34009f8b1e1f0 6,25
+  s_8135a8e578db20::t_54cd3b043e481b 1-5,7-24,26-33
+src/app/theme.ts
+  s_8135a8e578db20::t_2a156f5975bdb9 18-19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2002785cb1beb8e39d50c57bed111fbad8ab3bec",
+  "prompts": {},
+  "sessions": {
+    "s_8135a8e578db20": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f606e684-0212-461b-82c9-75c7acfb2f37",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
