@@ -317,7 +317,7 @@ const deepRoots: Roots = { home: "/home/u", project: "/home/u/repos/finance/plat
 test.each([[80, 24], [100, 34], [120, 34]])("no tab cuts a long name or path at %i columns", async (width, height) => {
   const setup = await testRender(<App adapters={[fakeAdapter("claude-code", longItems)]} roots={deepRoots} onQuit={() => {}} />, { width, height })
   try {
-    for (const [key, text] of [["1", "customer-billing-reconciliation-guidelines"], ["2", "quarterly-capex-review-assistant"], ["3", "finance-dashboard-service"], ["4", "billing-reconciliation-toolkit"]] as const) {
+    for (const [key, text] of [["1", "customer-billing-reconciliation-guidelines"], ["2", "quarterly-capex-review-assistant"], ["3", "finance-dashboard-service"], ["4", "billing-reconciliation-toolkit"], ["5", "Nothing to fix"]] as const) {
       setup.mockInput.pressKey(key)
       const frame = await waitForText(setup, text)
       expect(frame).not.toContain("…")
