@@ -27,9 +27,9 @@ export async function listItems(adapters: HarnessAdapter[], kind: Kind, roots: R
   }
   const items = [...merged.values()]
   if (kind === "mcp") await addImporters(active, items, roots)
-  return items.sort(
-    (a, b) => a.name.localeCompare(b.name) || HARNESS_ORDER.indexOf(a.harness) - HARNESS_ORDER.indexOf(b.harness),
-  )
+  const byName = (a: Item, b: Item) => a.name.localeCompare(b.name)
+  const byHarness = (a: Item, b: Item) => HARNESS_ORDER.indexOf(a.harness) - HARNESS_ORDER.indexOf(b.harness)
+  return items.sort(kind === "plugin" ? (a, b) => byHarness(a, b) || byName(a, b) : (a, b) => byName(a, b) || byHarness(a, b))
 }
 
 function mergeCopies(first: Item, copy: Item): Item {
