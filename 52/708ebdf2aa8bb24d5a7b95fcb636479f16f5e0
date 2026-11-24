@@ -1,0 +1,24 @@
+src/app/DetailPane.tsx
+  s_b03389a2a19d56::t_7c820ed47d77bf 53,86-88,93,134,145
+  s_b03389a2a19d56::t_7ac78c60eae501 49,55,81,97
+test/app/App.test.tsx
+  s_b03389a2a19d56::t_9f63c709b8ba43 166-172,174-181,183
+  s_b03389a2a19d56::t_b47e3de9d6d76d 163
+  s_b03389a2a19d56::t_ce2aad4f99c9ff 173,182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "52708ebdf2aa8bb24d5a7b95fcb636479f16f5e0",
+  "prompts": {},
+  "sessions": {
+    "s_b03389a2a19d56": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ec20c517-6e04-4d43-bc55-f60aa0b08378",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Andrew <andrew.tavaes87@gmail.com>"
+    }
+  }
+}
